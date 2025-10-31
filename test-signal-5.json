@@ -1,0 +1,11 @@
+{
+  "symbol": "ADAUSDT",
+  "signalType": "BUY",
+  "price": 0.95,
+  "timestamp": 1735329600000,
+  "metadata": {
+    "source": "final-test",
+    "indicator": "Volume Spike",
+    "confidence": 0.92
+  }
+}

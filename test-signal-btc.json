@@ -1,0 +1,11 @@
+{
+  "symbol": "BTCUSDT",
+  "signalType": "SELL",
+  "price": 96500,
+  "timestamp": 1735333200000,
+  "metadata": {
+    "source": "auto-test-3",
+    "indicator": "RSI Overbought",
+    "confidence": 0.88
+  }
+}

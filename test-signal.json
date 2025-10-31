@@ -1,0 +1,11 @@
+{
+  "symbol": "BTCUSDT",
+  "signalType": "BUY",
+  "price": 95000,
+  "timestamp": 1735315200000,
+  "metadata": {
+    "source": "test",
+    "indicator": "RSI",
+    "confidence": 0.85
+  }
+}
