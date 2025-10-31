@@ -46,7 +46,48 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
 
     setIsCapturing(true);
     try {
-      // Wait a bit more for charts to fully render
+      // Wait for charts to fully render - check if canvas has actual content
+      console.log('Waiting for charts to render...');
+      
+      const waitForCanvas = async (ref: React.RefObject<HTMLDivElement>, maxWait = 10000) => {
+        const startTime = Date.now();
+        while (Date.now() - startTime < maxWait) {
+          const canvas = ref.current?.querySelector('canvas') as HTMLCanvasElement;
+          if (canvas && canvas.width > 0 && canvas.height > 0) {
+            // Check if canvas has actual content (not just black/empty)
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const data = imageData.data;
+              
+              // Check if there's any non-black pixel
+              let hasContent = false;
+              for (let i = 0; i < data.length; i += 4) {
+                if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) {
+                  hasContent = true;
+                  break;
+                }
+              }
+              
+              if (hasContent) {
+                console.log('Canvas has content, ready to capture');
+                return true;
+              }
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        console.warn('Canvas render timeout');
+        return false;
+      };
+      
+      // Wait for both canvases to have content
+      await Promise.all([
+        waitForCanvas(indicator1Ref),
+        waitForCanvas(indicator2Ref)
+      ]);
+      
+      // Extra safety delay
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Capture indicators using Lightweight Charts' built-in screenshot functionality
