@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { signalStorage } from '@/lib/signalStorage';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { put } from '@vercel/blob';
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,9 +9,9 @@ export async function POST(request: NextRequest) {
     const chartImage = formData.get('chartImage') as File;
     const indicatorImage = formData.get('indicatorImage') as File;
 
-    if (!signalId || !chartImage || !indicatorImage) {
+    if (!signalId) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing signalId' },
         { status: 400 }
       );
     }
@@ -25,41 +24,60 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const folderPath = path.join(process.cwd(), signal.folderPath);
-    
-    await mkdir(folderPath, { recursive: true });
+    let chartImagePath: string | undefined;
+    let indicatorImagePath: string | undefined;
 
-    const chartBuffer = Buffer.from(await chartImage.arrayBuffer());
-    const chartFilename = `chart-${signal.timestamp}.png`;
-    const chartPath = path.join(folderPath, chartFilename);
-    await writeFile(chartPath, chartBuffer);
+    // Upload chart image to Vercel Blob
+    if (chartImage) {
+      try {
+        const blob = await put(`signals/${signalId}/chart.png`, chartImage, {
+          access: 'public',
+          addRandomSuffix: false,
+        });
+        chartImagePath = blob.url;
+        console.log('Chart image uploaded:', blob.url);
+      } catch (error) {
+        console.error('Error uploading chart image:', error);
+      }
+    }
 
-    const indicatorBuffer = Buffer.from(await indicatorImage.arrayBuffer());
-    const indicatorFilename = `indicator-${signal.timestamp}.png`;
-    const indicatorPath = path.join(folderPath, indicatorFilename);
-    await writeFile(indicatorPath, indicatorBuffer);
+    // Upload indicator image to Vercel Blob
+    if (indicatorImage) {
+      try {
+        const blob = await put(`signals/${signalId}/indicator.png`, indicatorImage, {
+          access: 'public',
+          addRandomSuffix: false,
+        });
+        indicatorImagePath = blob.url;
+        console.log('Indicator image uploaded:', blob.url);
+      } catch (error) {
+        console.error('Error uploading indicator image:', error);
+      }
+    }
 
-    const dateFolder = new Date(signal.timestamp).toISOString().split('T')[0];
-    const signalFolderName = path.basename(signal.folderPath);
-
-    await signalStorage.updateSignalMetadata(signalId, {
-      chartImagePath: `/signals/${dateFolder}/${signalFolderName}/${chartFilename}`,
-      indicatorImagePath: `/signals/${dateFolder}/${signalFolderName}/${indicatorFilename}`
-    });
+    // Update signal metadata with image URLs
+    if (chartImagePath || indicatorImagePath) {
+      await signalStorage.updateSignalMetadata(signalId, {
+        chartImagePath,
+        indicatorImagePath
+      });
+    }
 
     console.log(`Screenshots saved for signal ${signalId}`);
 
     return NextResponse.json(
       { 
         success: true,
-        message: 'Screenshots saved successfully'
+        message: 'Screenshots saved successfully',
+        chartImagePath,
+        indicatorImagePath
       },
       { status: 200 }
     );
   } catch (error) {
     console.error('Error saving signal images:', error);
     return NextResponse.json(
-      { error: 'Failed to save images' },
+      { error: 'Failed to save images', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
