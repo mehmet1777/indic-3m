@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
         const chartUrl = `http://localhost:3000/chart/${signal.symbol}`;
         await page.goto(chartUrl, { waitUntil: 'networkidle0' });
 
-        await page.waitForTimeout(3000);
+        await new Promise(resolve => setTimeout(resolve, 3000));
 
         const chartElement = await page.$('[data-chart-container]');
         const indicatorElement = await page.$('[data-indicator-container]');
