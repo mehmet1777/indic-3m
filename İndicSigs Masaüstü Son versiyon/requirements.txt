@@ -1,0 +1,7 @@
+PyQt5==5.15.9
+pandas==2.1.1
+python-binance==1.0.19
+numpy==1.24.3
+requests==2.31.0
+ccxt==4.2.15
+python-telegram-bot==20.7

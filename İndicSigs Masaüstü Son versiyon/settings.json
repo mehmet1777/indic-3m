@@ -1,0 +1,800 @@
+{
+    "telegram_token": "8018220817:AAGMAjiz0J6r0E8reweu6UFb9k_3kR8lQsY",
+    "telegram_chat_ids": [
+        "941059560",
+        "-1002469058314"
+    ],
+    "python.REPL.enableREPLSmartSend": false,
+    "telegram_groups": [
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BTC",
+            "chat_id": "-1002368112228",
+            "coins": "BTCUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ETH",
+            "chat_id": "-1002477336413",
+            "coins": "ETHUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BNB",
+            "chat_id": "-1002293218599",
+            "coins": "BNBUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - TRX",
+            "chat_id": "-1002434811922",
+            "coins": "TRXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - GENEL",
+            "chat_id": "-1002469058314",
+            "coins": "ALL"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AVAX",
+            "chat_id": "-1002435482181",
+            "coins": "AVAXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LINK",
+            "chat_id": "-1002281698060",
+            "coins": "LINKUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - TON",
+            "chat_id": "-1002420813987",
+            "coins": "TONUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SHIB",
+            "chat_id": "-1002440811833",
+            "coins": "SHIBUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SUI",
+            "chat_id": "-1002265454556",
+            "coins": "SUIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - XLM",
+            "chat_id": "-1002474848170",
+            "coins": "XLMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - HBAR",
+            "chat_id": "-1002300374224",
+            "coins": "HBARUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DOT",
+            "chat_id": "-1002486347400",
+            "coins": "DOTUSDT"
+        },
+        {
+            "name": "IND\u0130CS\u0130GS - UNI",
+            "chat_id": "-1002330522800",
+            "coins": "UNIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LTC",
+            "chat_id": "-1002461412390",
+            "coins": "LTCUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PEPE",
+            "chat_id": "-1002310426179",
+            "coins": "PEPEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - NEAR",
+            "chat_id": "-1002303379305",
+            "coins": "NEARUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - APT",
+            "chat_id": "-1002337556618",
+            "coins": "APTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - POL",
+            "chat_id": "-1002380155369",
+            "coins": "POLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DOGE",
+            "chat_id": "-1002474692239",
+            "coins": "DOGEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SOL",
+            "chat_id": "-1002479869880",
+            "coins": "SOLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CRP",
+            "chat_id": "-1002432325543",
+            "coins": "XRPUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ADA",
+            "chat_id": "-1002274665734",
+            "coins": "ADAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ARB",
+            "chat_id": "-1002311999114",
+            "coins": "ARBUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ENA",
+            "chat_id": "-1002476959400",
+            "coins": "ENAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FTM",
+            "chat_id": "-1002473166272",
+            "coins": "FTMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - OP",
+            "chat_id": "-1002439589794",
+            "coins": "OPUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - TIA",
+            "chat_id": "-1002427263930",
+            "coins": "TIAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - INJ",
+            "chat_id": "-1002472539622",
+            "coins": "INJUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LDO",
+            "chat_id": "-1002477983553",
+            "coins": "LDOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ATOM",
+            "chat_id": "-1002273389290",
+            "coins": "ATOMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - GOAT",
+            "chat_id": "-1002475179884",
+            "coins": "GOATUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ARKM",
+            "chat_id": "-1002340969153",
+            "coins": "ARKMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DOGS",
+            "chat_id": "-1002299606762",
+            "coins": "DOGSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CHZ",
+            "chat_id": "-1002271540440",
+            "coins": "CHZUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AR",
+            "chat_id": "-1002495906888",
+            "coins": "ARUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PENDLE",
+            "chat_id": "-1002321369027",
+            "coins": "PENDLEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ACX",
+            "chat_id": "-1002487519032",
+            "coins": "ACXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BLUR",
+            "chat_id": "-1002318130745",
+            "coins": "BLURUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MINA",
+            "chat_id": "-1002354491603",
+            "coins": "MINAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MOCA",
+            "chat_id": "-1002402513872",
+            "coins": "MOCAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ENS",
+            "chat_id": "-1002428158867",
+            "coins": "ENSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AERGO",
+            "chat_id": "-1002448671272",
+            "coins": "AERGOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - KAVA",
+            "chat_id": "-1002264466891",
+            "coins": "KAVAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - XMR",
+            "chat_id": "-1002375220856",
+            "coins": "XMRUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PEOPLE",
+            "chat_id": "-1002311065351",
+            "coins": "PEOPLEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SYN",
+            "chat_id": "-1002432548967",
+            "coins": "SYNUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - RENDER",
+            "chat_id": "-1002367092203",
+            "coins": "RENDERUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SPELL",
+            "chat_id": "-1002260636919",
+            "coins": "SPELLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS -RUNE",
+            "chat_id": "-1002455003907",
+            "coins": "RUNEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BOME",
+            "chat_id": "-1002368839026",
+            "coins": "BOMEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - APE",
+            "chat_id": "-1002396973946",
+            "coins": "APEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - TURBO",
+            "chat_id": "-1002311342271",
+            "coins": "TURBOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ETHFI",
+            "chat_id": "-1002473557561",
+            "coins": "ETHFIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BAT",
+            "chat_id": "-1002468842307",
+            "coins": "BATUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - RSR",
+            "chat_id": "-1002250862028",
+            "coins": "RSRUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - POPCAT",
+            "chat_id": "-1002307790333",
+            "coins": "POPCATUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CETUS",
+            "chat_id": "-1002453795762",
+            "coins": "CETUSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ETC",
+            "chat_id": "-1002410211728",
+            "coins": "ETCUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - EIGEN",
+            "chat_id": "-1002433633241",
+            "coins": "EIGENUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ARK",
+            "chat_id": "-1002402722894",
+            "coins": "ARKUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SUSHI",
+            "chat_id": "-1002189159622",
+            "coins": "SUSHIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - THE",
+            "chat_id": "-1002260998668",
+            "coins": "THEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CRV",
+            "chat_id": "-1002357127075",
+            "coins": "CRVUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SXP",
+            "chat_id": "-1002304155438",
+            "coins": "SXPUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - GMT",
+            "chat_id": "-1002390046840",
+            "coins": "GMTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - VANA",
+            "chat_id": "-1002357204170",
+            "coins": "VANAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PHA",
+            "chat_id": "-1002220111257",
+            "coins": "PHAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - VIRTUAL",
+            "chat_id": "-1002318877427",
+            "coins": "VIRTUALUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BIO",
+            "chat_id": "-1002334778870",
+            "coins": "BIOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MOVE",
+            "chat_id": "-1002254881951",
+            "coins": "MOVEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ACT",
+            "chat_id": "-1002445759169",
+            "coins": "ACTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MAGIC",
+            "chat_id": "-1002347829760",
+            "coins": "MAGICUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FET",
+            "chat_id": "-1002466354975",
+            "coins": "FETUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ZEN",
+            "chat_id": "-1002263734837",
+            "coins": "ZENUSDT"
+        },
+        {
+            "name": "ND\u0130CS\u0130GS - COW",
+            "chat_id": "-1002302342994",
+            "coins": "COWUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AAVE",
+            "chat_id": "-1002499328867",
+            "coins": "AAVEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - NEIRO",
+            "chat_id": "-1002369901725",
+            "coins": "NEIROUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PNUT",
+            "chat_id": "-1002433302894",
+            "coins": "PNUTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ORCA",
+            "chat_id": "-1002470517523",
+            "coins": "ORCAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PENGU",
+            "chat_id": "-1002457778798",
+            "coins": "PENGUUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - USUAL",
+            "chat_id": "-1002424953766",
+            "coins": "USUALUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SAGA",
+            "chat_id": "-1002415076257",
+            "coins": "SAGAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AGLD",
+            "chat_id": "-1002241725546",
+            "coins": "AGLDUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MANA",
+            "chat_id": "-1002368410730",
+            "coins": "MANAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - OM",
+            "chat_id": "-1002381777081",
+            "coins": "OMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FIL",
+            "chat_id": "-1002408337734",
+            "coins": "FILUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ALGO",
+            "chat_id": "-1002455190473",
+            "coins": "ALGOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - THETA",
+            "chat_id": "-1002368556114",
+            "coins": "THETAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ONDO",
+            "chat_id": "-1002277084267",
+            "coins": "ONDOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - WIF",
+            "chat_id": "-1002259026242",
+            "coins": "WIFUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - WLD",
+            "chat_id": "-1002497157462",
+            "coins": "WLDUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SEI",
+            "chat_id": "-1002273471622",
+            "coins": "SEIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FLOKI",
+            "chat_id": "-1002407222131",
+            "coins": "FLOKIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SAND",
+            "chat_id": "-1002420058841",
+            "coins": "SANDUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - GALA",
+            "chat_id": "-1002364828180",
+            "coins": "GALAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - EOS",
+            "chat_id": "-1002458397808",
+            "coins": "EOSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - JUP",
+            "chat_id": "-1002469373857",
+            "coins": "JUPUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FLOW",
+            "chat_id": "-1002333324969",
+            "coins": "FLOWUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - HNT",
+            "chat_id": "-1002325874096",
+            "coins": "HNTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DYDX",
+            "chat_id": "-1002236952142",
+            "coins": "DYDXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - NEO",
+            "chat_id": "-1002347258067",
+            "coins": "NEOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130S\u0130GS - SLERF",
+            "chat_id": "-1002492342048",
+            "coins": "SLERFUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DF",
+            "chat_id": "-1002484517707",
+            "coins": "DFUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AXL",
+            "chat_id": "-1002374577981",
+            "coins": "AXLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS  - ALCH",
+            "chat_id": "-1002485316232",
+            "coins": "ALCHUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SWAR",
+            "chat_id": "-1002319360633",
+            "coins": "SWARMUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS -  XVS",
+            "chat_id": "-1002321966418",
+            "coins": "XVSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ACE",
+            "chat_id": "-1002448514322",
+            "coins": "ACEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS  - MYRO",
+            "chat_id": "-1002489423006",
+            "coins": "MYROUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - C98",
+            "chat_id": "-1002346354658",
+            "coins": "C98USDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - OGN",
+            "chat_id": "-1002453974767",
+            "coins": "OGNUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DENT",
+            "chat_id": "-1002345311941",
+            "coins": "DENTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ALICE",
+            "chat_id": "-1002494017126",
+            "coins": "ALICEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CHR",
+            "chat_id": "-1002250564489",
+            "coins": "CHRUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BAKE",
+            "chat_id": "-1002251134255",
+            "coins": "BAKEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BNX",
+            "chat_id": "-1002477791764",
+            "coins": "BNXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS  - RDNT",
+            "chat_id": "-1002378635991",
+            "coins": "RDNTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - OXT",
+            "chat_id": "-1002380487985",
+            "coins": "OXTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SAFE",
+            "chat_id": "-1002457294219",
+            "coins": "SAFEUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - RARE",
+            "chat_id": "-1002328249414",
+            "coins": "RAREUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - FIO",
+            "chat_id": "-1002496185760",
+            "coins": "FIOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SWELL",
+            "chat_id": "-1002380319377",
+            "coins": "SWELLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - HOOK",
+            "chat_id": "-1002473957558",
+            "coins": "HOOKUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ALPHA",
+            "chat_id": "-1002325636467",
+            "coins": "ALPHAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CYBER",
+            "chat_id": "-1002499490073",
+            "coins": "CYBERUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - AKTU",
+            "chat_id": "-1002452117693",
+            "coins": "AKTUUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BCH",
+            "chat_id": "-1002399613231",
+            "coins": "BCHUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - REEF",
+            "chat_id": "-1002370285231",
+            "coins": "REEFUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LISTA",
+            "chat_id": "-1002423102295",
+            "coins": "LISTAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - NMR",
+            "chat_id": "-1002268505887",
+            "coins": "NMRUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - REZ",
+            "chat_id": "-1002195937861",
+            "coins": "REZUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - VID",
+            "chat_id": "-1002188222259",
+            "coins": "VIDUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - ILV",
+            "chat_id": "-1002350563420",
+            "coins": "ILVUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - QNT",
+            "chat_id": "-1002419983907",
+            "coins": "QNTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - UMA",
+            "chat_id": "-1002404468524",
+            "coins": "UMAUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LQTY",
+            "chat_id": "-1002434704259",
+            "coins": "LQTYUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BADGER",
+            "chat_id": "-1002395772165",
+            "coins": "BADGERUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LRC",
+            "chat_id": "-1002365060911",
+            "coins": "LRCUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - RVN",
+            "chat_id": "-1002491706347",
+            "coins": "RVNUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - HIGH",
+            "chat_id": "-1002431275196",
+            "coins": "HIGHUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - RONIN",
+            "chat_id": "-1002315444139",
+            "coins": "RONINUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SKL",
+            "chat_id": "-1002462144339",
+            "coins": "SKLUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - METIS",
+            "chat_id": "-1002481789848",
+            "coins": "METISUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - USTC",
+            "chat_id": "-1002298640209",
+            "coins": "USTCUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CELR",
+            "chat_id": "-1002392534092",
+            "coins": "CELRUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - TWT",
+            "chat_id": "-1002352153106",
+            "coins": "TWTUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - MBOX",
+            "chat_id": "-1002292993072",
+            "coins": "MBOXUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - PHB",
+            "chat_id": "-1002302653907",
+            "coins": "PHBUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LEVER",
+            "chat_id": "-1002382476841",
+            "coins": "LEVERUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - LIT",
+            "chat_id": "-1002434507219",
+            "coins": "LITUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - BICO",
+            "chat_id": "-1002407617564",
+            "coins": "BICOUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CHESS",
+            "chat_id": "-1002355448583",
+            "coins": "CHESSUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - SONIC",
+            "chat_id": "-1002360807085",
+            "coins": "SONICUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - CTSI",
+            "chat_id": "-1002406159715",
+            "coins": "CTSIUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - DUSK",
+            "chat_id": "-1002316455677",
+            "coins": "DUSKUSDT"
+        },
+        {
+            "name": "\u0130ND\u0130CS\u0130GS - D",
+            "chat_id": "-1002260501273",
+            "coins": "DUSDT"
+        },
+        {
+            "name": "\u0130ndicSigs-Saga",
+            "chat_id": "-1002076796941",
+            "coins": "ALL"
+        }
+    ]
+}

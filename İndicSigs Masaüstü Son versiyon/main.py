@@ -1,0 +1,3433 @@
+import sys
+import json
+import os
+import time
+import traceback
+from datetime import datetime, timedelta
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                            QHBoxLayout, QLabel, QPushButton, QLineEdit,
+                            QComboBox, QScrollArea, QFrame, QDialog,
+                            QListWidget, QMessageBox, QButtonGroup, QRadioButton,
+                            QDateTimeEdit, QCheckBox, QGroupBox, QStackedWidget,
+                            QListWidgetItem, QTableWidget, QTableWidgetItem,
+                            QTextEdit, QGridLayout)
+from PyQt5.QtCore import Qt, QTimer, QDateTime, QSize
+from PyQt5.QtGui import QPalette, QColor, QIcon
+import pandas as pd
+import numpy as np
+import ccxt
+# import pandas_ta as ta  # Removed due to Windows compatibility issues
+import winsound
+import telegram
+from nextjs_integration import send_to_nextjs
+import requests
+from login import API_URL
+from telegram_groups import TelegramGroupsDialog
+
+def calculate_wavetrend(df, n1=10, n2=21):
+    ap = (df['high'] + df['low'] + df['close']) / 3
+    esa = ap.ewm(span=n1, adjust=False).mean()
+    d = abs(ap - esa).ewm(span=n1, adjust=False).mean()
+    ci = (ap - esa) / (0.015 * d)
+    wt1 = ci.ewm(span=n2, adjust=False).mean()
+    wt2 = wt1.rolling(window=4).mean()
+    
+    return {
+        'wt1': wt1.iloc[-1],
+        'wt2': wt2.iloc[-1]
+    }
+
+def calculate_macd_dema(df):
+    # DEMA parametreleri
+    sma = 12  # DEMA Kısa
+    lma = 26  # DEMA Uzun
+    tsp = 9   # Sinyal
+
+    # DEMA Yavaş hesaplama
+    df['MMEslowa'] = df['close'].ewm(span=lma, adjust=False).mean()
+    df['MMEslowb'] = df['MMEslowa'].ewm(span=lma, adjust=False).mean()
+    df['DEMAslow'] = (2 * df['MMEslowa']) - df['MMEslowb']
+
+    # DEMA Hızlı hesaplama
+    df['MMEfasta'] = df['close'].ewm(span=sma, adjust=False).mean()
+    df['MMEfastb'] = df['MMEfasta'].ewm(span=sma, adjust=False).mean()
+    df['DEMAfast'] = (2 * df['MMEfasta']) - df['MMEfastb']
+
+    # MACD ZeroLag Line
+    df['LigneMACDZeroLag'] = df['DEMAfast'] - df['DEMAslow']
+
+    # Sinyal çizgisi
+    df['MMEsignala'] = df['LigneMACDZeroLag'].ewm(span=tsp, adjust=False).mean()
+    df['MMEsignalb'] = df['MMEsignala'].ewm(span=tsp, adjust=False).mean()
+    df['Lignesignal'] = (2 * df['MMEsignala']) - df['MMEsignalb']
+
+    # MACD ZeroLag Histogram
+    df['MACDZeroLag'] = df['LigneMACDZeroLag'] - df['Lignesignal']
+
+    return {
+        'MACD_DEMA': df['LigneMACDZeroLag'].iloc[-1],
+        'Signal_DEMA': df['Lignesignal'].iloc[-1],
+        'MACD_Hist_DEMA': df['MACDZeroLag'].iloc[-1]
+    }
+
+def calculate_bollinger_bands(df, length=20, mult=2.0, ma_type="SMA"):
+    # MA hesaplama fonksiyonu
+    def calculate_ma(source, ma_length, ma_type):
+        if ma_type == "SMA":
+            return source.rolling(window=ma_length).mean()
+        elif ma_type == "EMA":
+            return source.ewm(span=ma_length, adjust=False).mean()
+        elif ma_type == "SMMA":  # RMA
+            return source.ewm(alpha=1/ma_length, adjust=False).mean()
+        elif ma_type == "WMA":
+            weights = np.arange(1, ma_length + 1)
+            return source.rolling(window=ma_length).apply(lambda x: np.sum(weights * x) / weights.sum())
+        elif ma_type == "VWMA":
+            return (source * df['volume']).rolling(window=ma_length).sum() / df['volume'].rolling(window=ma_length).sum()
+    
+    # Orta band (Basis)
+    basis = calculate_ma(df['close'], length, ma_type)
+    
+    # Standart sapma
+    std = df['close'].rolling(window=length).std()
+    
+    # Üst ve alt bandlar
+    upper = basis + (mult * std)
+    lower = basis - (mult * std)
+    
+    return {
+        'BB_upper': upper.iloc[-1],
+        'BB_middle': basis.iloc[-1],
+        'BB_lower': lower.iloc[-1]
+    }
+
+def volume_weighted_macd(df):
+    macd = (df['volume'] * df['close']).ewm(span=12, adjust=False).mean() / df['volume'].ewm(span=12, adjust=False).mean() - \
+           (df['volume'] * df['close']).ewm(span=26, adjust=False).mean() / df['volume'].ewm(span=26, adjust=False).mean()
+    signal = macd.ewm(span=9, adjust=False).mean()
+    histogram = macd - signal
+    
+    return {
+        'macd': macd.iloc[-1],
+        'signal': signal.iloc[-1],
+        'histogram': histogram.iloc[-1]
+    }
+
+class CoinCard(QFrame):
+    def __init__(self, coin, parent=None):
+        super().__init__(parent)
+        self.coin = coin
+        self.setup_ui()
+        
+    def setup_ui(self):
+        self.setObjectName("coinCard")
+        self.setStyleSheet("""
+            QFrame#coinCard {
+                background-color: #2d2d2d;
+                border-radius: 10px;
+                padding: 15px;
+                margin: 5px;
+            }
+            QLabel {
+                color: white;
+            }
+            QLabel[class="header"] {
+                font-size: 16px;
+                font-weight: bold;
+                color: #2962ff;
+            }
+            QLabel[class="value"] {
+                font-size: 14px;
+                color: #e0e0e0;
+            }
+            QLabel[class="positive"] {
+                color: #00ff00;
+            }
+            QLabel[class="negative"] {
+                color: #ff0000;
+            }
+            QLabel[class="upper"] {
+                color: #F23645;
+            }
+            QLabel[class="lower"] {
+                color: #089981;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        
+        # Tarih ve saat
+        self.datetime_label = QLabel()
+        self.datetime_label.setProperty("class", "header")
+        layout.addWidget(self.datetime_label)
+        
+        # Coin ismi
+        coin_label = QLabel(f"Coin: {self.coin}")
+        coin_label.setProperty("class", "header")
+        layout.addWidget(coin_label)
+        
+        # Fiyat
+        self.price_label = QLabel()
+        self.price_label.setProperty("class", "value")
+        layout.addWidget(self.price_label)
+        
+        # Zaman dilimi
+        self.timeframe_label = QLabel()
+        self.timeframe_label.setProperty("class", "value")
+        layout.addWidget(self.timeframe_label)
+        
+        # WaveTrend İndikatörleri
+        wavetrend_label = QLabel("İndicPro İndikatörleri:")
+        wavetrend_label.setProperty("class", "header")
+        layout.addWidget(wavetrend_label)
+        
+        # WT1
+        self.wt1_label = QLabel()
+        self.wt1_label.setProperty("class", "value")
+        layout.addWidget(self.wt1_label)
+        
+        # WT2
+        self.wt2_label = QLabel()
+        self.wt2_label.setProperty("class", "value")
+        layout.addWidget(self.wt2_label)
+        
+        # WaveTrend Sinyal
+        self.wt_signal_label = QLabel()
+        layout.addWidget(self.wt_signal_label)
+
+        # MACD DEMA İndikatörleri
+        macd_label = QLabel("MACD DEMA İndikatörleri:")
+        macd_label.setProperty("class", "header")
+        layout.addWidget(macd_label)
+        
+        # MACD Line
+        self.macd_line_label = QLabel()
+        self.macd_line_label.setProperty("class", "value")
+        layout.addWidget(self.macd_line_label)
+        
+        # Signal Line
+        self.signal_line_label = QLabel()
+        self.signal_line_label.setProperty("class", "value")
+        layout.addWidget(self.signal_line_label)
+        
+        # Histogram
+        self.histogram_label = QLabel()
+        layout.addWidget(self.histogram_label)
+
+        # Bollinger Bands İndikatörü
+        bb_label = QLabel("Bollinger Bands:")
+        bb_label.setProperty("class", "header")
+        layout.addWidget(bb_label)
+        
+        # Upper Band
+        self.upper_band_label = QLabel()
+        self.upper_band_label.setProperty("class", "upper")
+        layout.addWidget(self.upper_band_label)
+        
+        # Middle Band (Basis)
+        self.basis_band_label = QLabel()
+        self.basis_band_label.setProperty("class", "value")
+        layout.addWidget(self.basis_band_label)
+        
+        # Lower Band
+        self.lower_band_label = QLabel()
+        self.lower_band_label.setProperty("class", "lower")
+        layout.addWidget(self.lower_band_label)
+
+        # Volume Weighted MACD İndikatörü
+        vwmacd_label = QLabel("Volume Weighted MACD:")
+        vwmacd_label.setProperty("class", "header")
+        layout.addWidget(vwmacd_label)
+        
+        # Sadece VW Histogram
+        self.vwhistogram_label = QLabel()
+        self.vwhistogram_label.setProperty("class", "value")
+        layout.addWidget(self.vwhistogram_label)
+        
+        layout.addStretch()
+        
+    def update_data(self, price, timeframe, wt_data, macd_data, bb_data, vwmacd_data):
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.datetime_label.setText(f"Tarih/Saat: {current_time}")
+        
+        # Fiyat gösterimi için decimal sayısını dinamik olarak ayarla
+        decimal_count = len(str(price).split('.')[-1])
+        self.price_label.setText(f"Güncel Fiyat: {price:.{decimal_count}f}")
+        
+        self.timeframe_label.setText(f"Zaman Dilimi: {timeframe}")
+        
+        # WaveTrend
+        self.wt1_label.setText(f"WT1: {wt_data['wt1']:.2f}")
+        self.wt2_label.setText(f"WT2: {wt_data['wt2']:.2f}")
+        
+        # WaveTrend Sinyal
+        if wt_data['wt1'] > wt_data['wt2']:
+            signal_text = "Sinyal: Yukarı Kesişim"
+            self.wt_signal_label.setStyleSheet("color: #00ff00;")  # Yeşil
+        else:
+            signal_text = "Sinyal: Aşağı Kesişim"
+            self.wt_signal_label.setStyleSheet("color: #ff0000;")  # Kırmızı
+        self.wt_signal_label.setText(signal_text)
+        
+        # MACD DEMA
+        self.macd_line_label.setText(f"MACD: {macd_data['MACD_DEMA']:.10f}")
+        self.signal_line_label.setText(f"Sinyal: {macd_data['Signal_DEMA']:.10f}")
+        self.histogram_label.setText(f"Histogram: {macd_data['MACD_Hist_DEMA']:.10f}")
+        
+        # Bollinger Bands - Decimal sayısını fiyat ile aynı yap
+        self.upper_band_label.setText(f"Üst Band: {bb_data['BB_upper']:.{decimal_count}f}")
+        self.basis_band_label.setText(f"Orta Band: {bb_data['BB_middle']:.{decimal_count}f}")
+        self.lower_band_label.setText(f"Alt Band: {bb_data['BB_lower']:.{decimal_count}f}")
+        
+        # Volume Weighted MACD
+        self.vwhistogram_label.setText(f"VW Histogram: {vwmacd_data['histogram']:.10f}")
+        
+        self.vwhistogram_label.style().unpolish(self.vwhistogram_label)
+        self.vwhistogram_label.style().polish(self.vwhistogram_label)
+
+class CoinListItem(QFrame):
+    def __init__(self, coin, parent=None):
+        super().__init__(parent)
+        self.coin = coin
+        self.main_window = parent
+        self.setup_ui()
+        
+    def setup_ui(self):
+        self.setObjectName("coinListItem")
+        self.setStyleSheet("""
+            QFrame#coinListItem {
+                background-color: #2d2d2d;
+                border-radius: 5px;
+                padding: 10px;
+                margin: 2px;
+            }
+            QFrame#coinListItem:hover {
+                background-color: #3d3d3d;
+            }
+            QLabel {
+                color: white;
+                font-size: 14px;
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 5, 10, 5)
+        
+        # Coin ismi
+        self.name_label = QLabel(self.coin)
+        layout.addWidget(self.name_label)
+        
+        # Sağa hizalı ok işareti
+        arrow_label = QLabel("➜")
+        arrow_label.setStyleSheet("color: #2962ff;")
+        layout.addWidget(arrow_label, alignment=Qt.AlignmentFlag.AlignRight)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.main_window.show_coin_card(self.coin)
+            
+    def enterEvent(self, event):
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        super().enterEvent(event)
+        
+    def leaveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().leaveEvent(event)
+
+class SavedCoinsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Kaydedilen Coinler")
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # Coin listesi
+        self.coin_list = QListWidget()
+        self.load_coins()
+        layout.addWidget(self.coin_list)
+        
+        # Butonlar
+        button_layout = QHBoxLayout()
+        
+        self.delete_button = QPushButton("Seçili Coini Sil")
+        self.delete_button.clicked.connect(self.delete_selected_coin)
+        
+        button_layout.addWidget(self.delete_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+            }
+            QListWidget {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #2962ff;
+            }
+            QPushButton {
+                background-color: #2962ff;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+            QPushButton:pressed {
+                background-color: #1976d2;
+            }
+            QPushButton:disabled {
+                background-color: #666666;
+            }
+        """)
+    
+    def load_coins(self):
+        self.coin_list.clear()
+        saved_coins = self.load_saved_coins()
+        self.coin_list.addItems(saved_coins)
+    
+    def load_saved_coins(self):
+        try:
+            with open("saved_coins.json", "r") as f:
+                data = json.load(f)
+                return data.get("coins", [])
+        except FileNotFoundError:
+            return []
+    
+    def save_coins(self, coins):
+        with open("saved_coins.json", "w") as f:
+            json.dump({"coins": coins}, f)
+    
+    def delete_selected_coin(self):
+        selected_items = self.coin_list.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Hata", "Lütfen silmek için bir coin seçin!")
+            return
+            
+        coin = selected_items[0].text()
+        reply = QMessageBox.question(
+            self,
+            "Coin Sil",
+            f"{coin} silmek istediğinizden emin misiniz?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # JSON dosyasından sil
+                saved_coins = self.load_saved_coins()
+                if coin in saved_coins:
+                    saved_coins.remove(coin)
+                    self.save_coins(saved_coins)
+                
+                # Listeden sil
+                self.coin_list.takeItem(self.coin_list.row(selected_items[0]))
+                
+                # Ana penceredeki kartı ve görünümü güncelle
+                if self.parent:
+                    self.parent.remove_coin_from_cards(coin)
+                    self.parent.reset_view()
+                
+                QMessageBox.information(self, "Başarılı", f"{coin} başarıyla silindi!")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "Hata", f"Coin silinirken hata oluştu: {str(e)}")
+            
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Kripto Para Analiz")
+        self.resize(1200, 800)
+        
+        # Dosya yolları
+        self.saved_coins_file = "saved_coins.json"
+        self.settings_file = "settings.json"
+        
+        # Exchange setup
+        self.exchange = ccxt.binance()
+        
+        # Telegram bot setup
+        self.telegram_bot = None
+        self.telegram_token = ""
+        self.telegram_chat_ids = []
+        self.load_settings()
+        self.setup_telegram_bot()
+        
+        # Timer setup
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_data)
+        
+        # Alarm timer setup
+        self.alarm_timer = QTimer()
+        self.alarm_timer.timeout.connect(self.check_all_alarms)
+        # Timer'lar başlangıçta başlamayacak, sadece başlat butonuna basıldığında başlayacak
+        
+        # Önceki değerleri tutmak için sözlük
+        self.previous_values = {}
+        
+        # Alarm kartlarını tutmak için sözlük
+        self.alarm_cards = {}
+        
+        # Coin verileri için sözlükler
+        self.coin_cards = {}
+        self.coin_data_cache = {}
+        self.last_update_time = {}
+        
+        # Bildirimler listesi
+        self.notifications = []
+        
+        # Web bildirimleri için token ve kullanıcı
+        self.token = None
+        self.user = None
+        
+        # Alarm tetiklenme fiyatı
+        self.alarm_trigger_price = None
+        
+        # BTC fiyatları
+        self.btc_prices = {}  # Her zaman dilimi için BTC fiyatlarını tutacak dictionary
+        
+        # 24 saatlik performans verileri için cache
+        self.market_performance_cache = {}
+        self.market_performance_last_update = None
+        
+        # Spam önleme için son sinyal zamanları
+        self.last_signal_times = {}  # {coin: datetime}
+        
+        # UI setup
+        self.setup_ui()
+        
+        # Kayıtlı BTC fiyatlarını yükle
+        self.load_btc_prices()
+    
+    def load_settings(self):
+        """Ayarları yükle"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, "r") as f:
+                    settings = json.load(f)
+                    self.telegram_token = settings.get("telegram_token", "")
+                    self.telegram_chat_ids = settings.get("telegram_chat_ids", [])
+            else:
+                self.telegram_token = ""
+                self.telegram_chat_ids = []
+        except Exception as e:
+            print(f"Ayarlar yüklenirken hata: {e}")
+            self.telegram_token = ""
+            self.telegram_chat_ids = []
+
+    def setup_telegram_bot(self):
+        """Telegram bot'u kur"""
+        try:
+            if self.telegram_token and self.telegram_chat_ids:
+                # Basit bot kurulumu - connection pool ayarları ile
+                from telegram.request import HTTPXRequest
+                request = HTTPXRequest(
+                    connection_pool_size=1,
+                    pool_timeout=30.0,
+                    read_timeout=30.0,
+                    write_timeout=30.0,
+                    connect_timeout=30.0
+                )
+                self.telegram_bot = telegram.Bot(token=self.telegram_token, request=request)
+                print("Telegram bot başarıyla kuruldu!")
+            else:
+                print("Telegram bot kurulumu için token ve en az bir chat ID gerekli!")
+                self.telegram_bot = None
+        except Exception as e:
+            print(f"Telegram bot kurulumunda hata: {e}")
+            self.telegram_bot = None
+
+    def send_telegram_message(self, message):
+        """Birden fazla gruba Telegram mesajı gönder"""
+        try:
+            if not self.telegram_bot:
+                self.setup_telegram_bot()
+            
+            if self.telegram_bot:
+                # Ayarlardan grupları al
+                with open(self.settings_file, "r") as f:
+                    settings = json.load(f)
+                
+                telegram_groups = settings.get("telegram_groups", [])
+                
+                # Mesajdaki coin'i bul
+                coin = ""
+                for line in message.split('\n'):
+                    if 'Coin:' in line:
+                        coin = line.split('Coin:')[1].strip()
+                        break
+                
+                print(f"Mesajdaki coin: {coin}")  # Debug için
+                
+                # Her grup için kontrol et
+                for group in telegram_groups:
+                    group_coins = group.get("coins", "")
+                    group_name = group.get("name", "")
+                    chat_id = group.get("chat_id", "")
+                    
+                    print(f"Grup kontrol ediliyor: {group_name}, Coins: {group_coins}, Chat ID: {chat_id}")
+                    
+                    # Eğer grup "ALL" ise veya coin grup listesinde varsa
+                    if group_coins == "ALL" or coin == group_coins:
+                        try:
+                            # Basit senkron yaklaşım - requests kullanarak
+                            import requests
+                            
+                            telegram_url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+                            
+                            # Inline klavye için buton tanımla
+                            reply_markup = {
+                                "inline_keyboard": [
+                                    [
+                                        {
+                                            "text": "Simülasyon Sitesinde Dene",
+                                            "url": "https://trading-signals-app-24yu.vercel.app/"
+                                        }
+                                    ]
+                                ]
+                            }
+
+                            payload = {
+                                'chat_id': chat_id,
+                                'text': message,
+                                'parse_mode': 'HTML',
+                                'reply_markup': json.dumps(reply_markup) # JSON nesnesini string'e çevir
+                            }
+                            
+                            response = requests.post(telegram_url, data=payload, timeout=30)
+                            
+                            if response.status_code == 200:
+                                print(f"Mesaj başarıyla gönderildi: {group_name}")
+                            else:
+                                print(f"Grup {group_name} için mesaj gönderilirken hata: HTTP {response.status_code}")
+                                
+                        except Exception as e:
+                            print(f"Grup {group_name} için mesaj gönderilirken hata: {e}")
+                    else:
+                        print(f"Grup {group_name} için coin eşleşmedi: {group_coins} != {coin}")
+            else:
+                print("Telegram mesajı gönderilemedi: Bot eksik!")
+        except Exception as e:
+            print(f"Telegram mesajı gönderilirken genel hata: {e}")
+
+    def send_web_notification(self, message):
+        """Web sitesine bildirim gönder"""
+        try:
+            if self.user and self.token:
+                notification_data = {
+                    "type": "SIGNAL",
+                    "userId": self.user['id'],
+                    "status": "TETİKLENDİ",
+                    "messageContent": message  # Telegram'a gönderilen mesajın aynısı
+                }
+
+                print("\n=== Web Bildirimi Debug ===")
+                print("Gönderilen veri:")
+                print(json.dumps(notification_data, indent=2, ensure_ascii=False))
+
+                response = requests.post(
+                    f"{API_URL}/api/notifications",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=notification_data
+                )
+                
+                print("\nAPI URL:", f"{API_URL}/api/notifications")
+                print("Status Code:", response.status_code)
+                print("Yanıt:")
+                try:
+                    print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+                except:
+                    print(response.text)
+                print("=== Debug Sonu ===\n")
+                
+                if response.status_code != 201:
+                    print(f"Web bildirimi gönderilemedi: {response.text}")
+                
+        except Exception as e:
+            print(f"Web bildirimi gönderilirken hata: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
+    
+    def send_notification(self, message):
+        """Hem Telegram hem web sitesine bildirim gönder"""
+        try:
+            # BTC analizini al
+            btc_report = self.get_btc_analysis()
+            
+            # "Zaman Dilimleri:" ve "Not:" arasına BTC raporunu ekle
+            if "⏱ Zaman Dilimleri:" in message and "📝 Not:" in message:
+                parts = message.split("📝 Not:")
+                time_parts = parts[0].split("⏱ Zaman Dilimleri:")
+                enhanced_message = time_parts[0] + "⏱ Zaman Dilimleri:" + time_parts[1] + "\n\n" + btc_report + "\n\n📝 Not:" + parts[1]
+            else:
+                # Eğer format farklıysa sona ekle
+                enhanced_message = message + "\n\n" + btc_report
+            
+            # Bildirimleri gönder
+            self.send_telegram_message(enhanced_message)
+            self.send_web_notification(enhanced_message)
+            send_to_nextjs(enhanced_message)  # Next.js API'ye gönder
+        except Exception as e:
+            print(f"Bildirim gönderme hatası: {str(e)}")
+            # Hata durumunda orijinal mesajı gönder
+            self.send_telegram_message(message)
+            self.send_web_notification(message)
+            send_to_nextjs(message)  # Next.js API'ye gönder
+
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Üst kısım - Arama ve butonlar
+        top_layout = QHBoxLayout()
+        
+        # Arama kutusu
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Coin ara... (örn: BTC)")
+        top_layout.addWidget(self.search_input)
+        
+        # Coin Ekle butonu
+        self.add_button = QPushButton("Coin Ekle")
+        self.add_button.clicked.connect(self.add_coin)
+        top_layout.addWidget(self.add_button)
+        
+        # Kaydedilen Coinler butonu
+        self.saved_coins_button = QPushButton("Kaydedilen Coinler")
+        self.saved_coins_button.clicked.connect(self.show_saved_coins)
+        top_layout.addWidget(self.saved_coins_button)
+        
+        layout.addLayout(top_layout)
+        
+        # Orta kısım - Butonlar
+        button_layout = QHBoxLayout()
+        
+        # Başlat butonu
+        self.start_button = QPushButton("Başlat")
+        self.start_button.clicked.connect(self.start_tracking)
+        button_layout.addWidget(self.start_button)
+        
+        # Durdur butonu
+        self.stop_button = QPushButton("Durdur")
+        self.stop_button.clicked.connect(self.stop_tracking)
+        self.stop_button.setEnabled(False)
+        button_layout.addWidget(self.stop_button)
+        
+        # Sıfırla butonu
+        self.reset_button = QPushButton("Sıfırla")
+        self.reset_button.clicked.connect(self.reset_view)
+        button_layout.addWidget(self.reset_button)
+        
+        layout.addLayout(button_layout)
+        
+        # Alt kısım - İkinci buton sırası
+        second_button_layout = QHBoxLayout()
+        
+        # Alarm Kur butonu
+        self.bulk_alarm_button = QPushButton("Alarm Kur")
+        self.bulk_alarm_button.clicked.connect(self.show_bulk_alarm_dialog)
+        second_button_layout.addWidget(self.bulk_alarm_button)
+        
+        # Kayıtlı Alarmlar butonu
+        self.alarms_button = QPushButton("Kayıtlı Alarmlar")
+        self.alarms_button.clicked.connect(self.show_alarms)
+        second_button_layout.addWidget(self.alarms_button)
+        
+        # Bildirimler butonu
+        self.notifications_button = QPushButton("Bildirimler")
+        self.notifications_button.clicked.connect(self.show_notifications)
+        second_button_layout.addWidget(self.notifications_button)
+        
+        # Telegram Grupları butonu
+        self.telegram_groups_button = QPushButton("Telegram Grupları")
+        self.telegram_groups_button.clicked.connect(self.show_telegram_groups)
+        second_button_layout.addWidget(self.telegram_groups_button)
+        
+        layout.addLayout(second_button_layout)
+        
+        # Stacked widget for list and card views
+        self.stacked_widget = QStackedWidget()
+        
+        # List view
+        self.list_widget = QWidget()
+        list_layout = QVBoxLayout(self.list_widget)
+        
+        # Scroll area for coin list
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_container = QWidget()
+        self.coin_list = QVBoxLayout(scroll_container)
+        self.coin_list.addStretch()
+        
+        # Modern scroll bar style
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #2d2d2d;
+                width: 8px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #2962ff;
+                min-height: 30px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #1e88e5;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
+        
+        scroll_area.setWidget(scroll_container)
+        list_layout.addWidget(scroll_area)
+        
+        # Card view
+        self.card_widget = QWidget()
+        self.card_layout = QVBoxLayout(self.card_widget)
+        
+        self.stacked_widget.addWidget(self.list_widget)
+        self.stacked_widget.addWidget(self.card_widget)
+        
+        layout.addWidget(self.stacked_widget)
+        
+        # Back button for card view
+        self.back_button = QPushButton("← Listeye Dön")
+        self.back_button.clicked.connect(self.show_list_view)
+        self.back_button.hide()
+        layout.addWidget(self.back_button)
+        
+        # Dark theme
+        self.apply_dark_theme()
+        
+        # Load saved coins
+        self.load_coin_list()
+    
+    def load_coin_list(self):
+        # Clear existing items
+        while self.coin_list.count():
+            item = self.coin_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Add saved coins
+        saved_coins = self.load_saved_coins()
+        for coin in saved_coins:
+            item = CoinListItem(coin, self)
+            self.coin_list.addWidget(item)
+    
+    def show_coin_card(self, coin):
+        # Önce tüm kartları temizle
+        self.clear_cards()
+        
+        # Sadece seçilen coin için kart oluştur
+        card = CoinCard(coin)
+        self.coin_cards[coin] = card
+        self.card_layout.addWidget(card)
+        
+        # Kart görünümüne geç
+        self.stacked_widget.setCurrentWidget(self.card_widget)
+        self.back_button.show()
+        
+        # Timer aktifse veriyi güncelle
+        if self.timer.isActive():
+            self.calculate_indicators(coin)
+    
+    def show_list_view(self):
+        self.stacked_widget.setCurrentWidget(self.list_widget)
+        self.back_button.hide()
+        
+        # Clear cards
+        self.clear_cards()
+        
+        # Liste görünümünü güncelle
+        self.load_coin_list()
+
+    def reset_view(self):
+        # Timer'ı durdur
+        self.timer.stop()
+        
+        # Coin kartlarını temizle
+        self.clear_cards()
+        
+        # Liste görünümüne geç ve listeyi yenile
+        self.show_list_view()
+        self.load_coin_list()
+        
+        # Butonları güncelle
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        
+        QMessageBox.information(self, "Bilgi", "Görünüm sıfırlandı!")
+
+    def get_coin_data(self, coin, timeframe):
+        try:
+            current_time = datetime.now()
+            cache_key = f"{coin}_{timeframe}"
+            
+            # Check if we have cached data and if it's still fresh (less than 10 seconds old)
+            if (cache_key in self.coin_data_cache and 
+                cache_key in self.last_update_time and 
+                (current_time - self.last_update_time[cache_key]).total_seconds() < 10):
+                return self.coin_data_cache[cache_key]
+            
+            # Fetch new data from the exchange
+            try:
+                ohlcv = self.exchange.fetch_ohlcv(coin, timeframe, limit=100)
+                if not ohlcv:
+                    print(f"Warning: No data received for {coin} on {timeframe} timeframe")
+                    return None
+                
+                df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
+                
+                # Cache the data
+                self.coin_data_cache[cache_key] = df
+                self.last_update_time[cache_key] = current_time
+                
+                return df
+                
+            except ccxt.NetworkError as e:
+                print(f"Network error while fetching data for {coin}: {str(e)}")
+                return None
+            except ccxt.ExchangeError as e:
+                print(f"Exchange error for {coin}: {str(e)}")
+                return None
+            except Exception as e:
+                print(f"Unexpected error fetching data for {coin}: {str(e)}")
+                return None
+                
+        except Exception as e:
+            print(f"Error in get_coin_data: {str(e)}")
+            return None
+
+    def calculate_indicators(self, symbol):
+        try:
+            if symbol not in self.coin_cards:
+                return
+                
+            timeframe = self.timeframe_combo.currentText()
+            df = self.get_coin_data(symbol, timeframe)
+            
+            if df is None:
+                return
+            
+            # Son fiyat
+            last_price = df['close'].iloc[-1]
+            
+            # WaveTrend hesapla
+            wt_data = calculate_wavetrend(df)
+            
+            # MACD DEMA hesapla
+            macd_data = calculate_macd_dema(df)
+            
+            # Bollinger Bands hesapla
+            bb_data = calculate_bollinger_bands(df)
+            
+            # Volume Weighted MACD hesapla
+            vwmacd_data = volume_weighted_macd(df)
+            
+            # Kart hala mevcut mu kontrol et
+            if symbol in self.coin_cards and self.coin_cards[symbol] is not None:
+                self.coin_cards[symbol].update_data(
+                    last_price,
+                    timeframe,
+                    wt_data,
+                    macd_data,
+                    bb_data,
+                    vwmacd_data
+                )
+                
+        except Exception as e:
+            print(f"İndikatör hesaplama hatası ({symbol}): {str(e)}")
+            if symbol in self.coin_cards:
+                del self.coin_cards[symbol]
+
+    def update_data(self):
+        # Aktif kartları güncelle
+        for coin in list(self.coin_cards.keys()):
+            if self.coin_cards[coin] is not None:
+                self.calculate_indicators(coin)
+
+    def start_tracking(self):
+        # Timer'ı başlat
+        self.timer.start(5000)
+        self.alarm_timer.start(3000)  # Her 3 saniyede bir kontrol et
+        
+        # Buton durumlarını güncelle
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        
+        # Eğer kart görünümündeyse mevcut kartı güncelle
+        if self.stacked_widget.currentWidget() == self.card_widget:
+            for coin in self.coin_cards:
+                self.calculate_indicators(coin)
+        
+        QMessageBox.information(self, "Bilgi", "Veri takibi başlatıldı!")
+
+    def stop_tracking(self):
+        self.timer.stop()
+        self.alarm_timer.stop()
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        QMessageBox.information(self, "Bilgi", "Veri takibi durduruldu!")
+        
+    def clear_cards(self):
+        # Güvenli bir şekilde kartları temizle
+        if hasattr(self, 'coin_cards'):
+            for coin in list(self.coin_cards.keys()):
+                if self.coin_cards[coin] is not None:
+                    self.coin_cards[coin].deleteLater()
+            self.coin_cards.clear()
+
+    def load_saved_coins(self):
+        if not os.path.exists(self.saved_coins_file):
+            return []
+        try:
+            with open(self.saved_coins_file, 'r') as f:
+                data = json.load(f)
+                return data.get('coins', [])
+        except Exception as e:
+            print(f"Kayıtlı coinleri yükleme hatası: {e}")
+            return []
+
+    def save_coins(self, coins):
+        try:
+            with open(self.saved_coins_file, 'w') as f:
+                json.dump({'coins': coins}, f)
+        except Exception as e:
+            print(f"Coin kaydetme hatası: {e}")
+
+    def add_coin(self):
+        symbol = self.search_input.text().strip().upper()
+        if symbol:
+            # Coin'i kaydet
+            saved_coins = self.load_saved_coins()
+            if symbol not in saved_coins:
+                saved_coins.append(symbol)
+                self.save_coins(saved_coins)
+            
+            # Liste öğesi ekle
+            item = CoinListItem(symbol, self)
+            self.coin_list.addWidget(item)
+            
+            # Arama kutusunu temizle
+            self.search_input.clear()
+            
+            QMessageBox.information(self, "Başarılı", f"{symbol} başarıyla eklendi!")
+        else:
+            QMessageBox.warning(self, "Hata", "Lütfen bir coin sembolü girin!")
+
+    def show_saved_coins(self):
+        dialog = SavedCoinsDialog(self)
+        dialog.exec()
+
+    def remove_coin_from_cards(self, coin):
+        # Coin kartını sil
+        if coin in self.coin_cards:
+            self.coin_cards[coin].deleteLater()
+            del self.coin_cards[coin]
+        
+        # Coin verilerini önbellekten temizle
+        cache_key_prefix = f"{coin}_"
+        keys_to_remove = [k for k in self.coin_data_cache.keys() if k.startswith(cache_key_prefix)]
+        for key in keys_to_remove:
+            del self.coin_data_cache[key]
+            if key in self.last_update_time:
+                del self.last_update_time[key]
+        
+        # Liste görünümünü güncelle
+        self.load_coin_list()
+
+    def reset_view(self):
+        # Timer'ı durdur
+        self.timer.stop()
+        self.alarm_timer.stop()
+        
+        # Coin kartlarını temizle
+        self.clear_cards()
+        
+        # Liste görünümüne geç ve listeyi yenile
+        self.show_list_view()
+        self.load_coin_list()
+        
+        # Butonları güncelle
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        
+        QMessageBox.information(self, "Bilgi", "Görünüm sıfırlandı!")
+
+    def show_list_view(self):
+        # Liste görünümüne geç
+        self.stacked_widget.setCurrentWidget(self.list_widget)
+        self.back_button.hide()
+        
+        # Kartları temizle
+        self.clear_cards()
+        
+        # Coin listesini yenile
+        self.load_coin_list()
+
+    def apply_dark_theme(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #1a1a1a;
+            }
+            QWidget {
+                background-color: #1a1a1a;
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #2962ff;
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+            QLineEdit {
+                padding: 8px;
+                border: 2px solid #424242;
+                border-radius: 4px;
+                background-color: #2d2d2d;
+                color: white;
+                font-size: 14px;
+                min-width: 300px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2962ff;
+            }
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #424242;
+                border-radius: 4px;
+                background-color: #2d2d2d;
+                color: white;
+                min-width: 150px;
+            }
+            QScrollArea {
+                background-color: #1a1a1a;
+            }
+        """)
+
+    def load_btc_prices(self):
+        """Kaydedilmiş BTC fiyatlarını yükler"""
+        try:
+            if os.path.exists("btc_prices.json"):
+                with open("btc_prices.json", "r") as f:
+                    saved_prices = json.load(f)
+                    # String olan tarihleri datetime objesine çevir
+                    self.btc_prices = {datetime.fromisoformat(k): v for k, v in saved_prices.items()}
+        except Exception as e:
+            print(f"BTC fiyatları yüklenirken hata: {str(e)}")
+
+    def save_btc_prices(self):
+        """BTC fiyatlarını dosyaya kaydeder"""
+        try:
+            # datetime objeleri string'e çevir
+            prices_to_save = {k.isoformat(): v for k, v in self.btc_prices.items()}
+            with open("btc_prices.json", "w") as f:
+                json.dump(prices_to_save, f)
+        except Exception as e:
+            print(f"BTC fiyatları kaydedilirken hata: {str(e)}")
+    
+    def get_market_performance(self):
+        """
+        Binance'den tüm coinlerin 24 saatlik performansını çeker
+        Cache kullanarak 5 dakikada bir günceller
+        """
+        try:
+            current_time = datetime.now()
+            
+            # Cache kontrolü - 5 dakikada bir güncelle
+            if (self.market_performance_last_update and 
+                (current_time - self.market_performance_last_update).seconds < 300 and
+                self.market_performance_cache):
+                return self.market_performance_cache
+            
+            print("Binance'den 24 saatlik performans verileri çekiliyor...")
+            
+            # Binance'den tüm ticker verilerini çek
+            tickers = self.exchange.fetch_tickers()
+            
+            # Sadece USDT paritelerini filtrele
+            usdt_tickers = []
+            for symbol, ticker in tickers.items():
+                if symbol.endswith('/USDT'):
+                    # Percentage değişimi al
+                    change_24h = ticker.get('percentage', 0)
+                    if change_24h is not None:
+                        coin_name = symbol.replace('/USDT', 'USDT')
+                        usdt_tickers.append({
+                            'symbol': coin_name,
+                            'change_24h': float(change_24h),
+                            'volume': ticker.get('quoteVolume', 0)  # USDT cinsinden hacim
+                        })
+            
+            # En çok yükselenleri sırala
+            gainers = sorted(usdt_tickers, key=lambda x: x['change_24h'], reverse=True)[:100]
+            
+            # En çok düşenleri sırala
+            losers = sorted(usdt_tickers, key=lambda x: x['change_24h'])[:100]
+            
+            # Cache'e kaydet
+            self.market_performance_cache = {
+                'gainers': gainers,
+                'losers': losers,
+                'all_tickers': usdt_tickers
+            }
+            self.market_performance_last_update = current_time
+            
+            print(f"Toplam {len(usdt_tickers)} USDT çifti işlendi")
+            return self.market_performance_cache
+            
+        except Exception as e:
+            print(f"Market performans verisi çekilirken hata: {str(e)}")
+            return None
+    
+    def get_coin_market_position(self, coin):
+        """
+        Belirli bir coin'in piyasadaki konumunu analiz eder
+        Returns: {
+            'change_24h': float,
+            'gainer_rank': int or None,
+            'loser_rank': int or None,
+            'total_coins': int
+        }
+        """
+        try:
+            performance_data = self.get_market_performance()
+            if not performance_data:
+                return None
+            
+            # Coin'i bul
+            coin_data = None
+            for ticker in performance_data['all_tickers']:
+                if ticker['symbol'] == coin:
+                    coin_data = ticker
+                    break
+            
+            if not coin_data:
+                print(f"{coin} için performans verisi bulunamadı")
+                return None
+            
+            change_24h = coin_data['change_24h']
+            
+            # En çok yükselenler listesinde mi?
+            gainer_rank = None
+            for idx, gainer in enumerate(performance_data['gainers'], 1):
+                if gainer['symbol'] == coin:
+                    gainer_rank = idx
+                    break
+            
+            # En çok düşenler listesinde mi?
+            loser_rank = None
+            for idx, loser in enumerate(performance_data['losers'], 1):
+                if loser['symbol'] == coin:
+                    loser_rank = idx
+                    break
+            
+            return {
+                'change_24h': change_24h,
+                'gainer_rank': gainer_rank,
+                'loser_rank': loser_rank,
+                'total_coins': len(performance_data['all_tickers'])
+            }
+            
+        except Exception as e:
+            print(f"Coin market pozisyonu hesaplanırken hata: {str(e)}")
+            return None
+    
+    def format_market_position_text(self, coin):
+        """
+        Coin'in piyasa pozisyonunu formatlanmış metin olarak döndürür
+        """
+        try:
+            position = self.get_coin_market_position(coin)
+            if not position:
+                return ""
+            
+            change_24h = position['change_24h']
+            gainer_rank = position['gainer_rank']
+            loser_rank = position['loser_rank']
+            
+            # Değişim yönü emoji
+            if change_24h > 0:
+                change_emoji = "📈"
+                change_text = f"+{change_24h:.2f}%"
+            elif change_24h < 0:
+                change_emoji = "📉"
+                change_text = f"{change_24h:.2f}%"
+            else:
+                change_emoji = "➡️"
+                change_text = "0.00%"
+            
+            # Metin oluştur
+            text = f"📊 24 Saatlik Performans:\n"
+            text += f"{change_emoji} Değişim: {change_text}\n"
+            
+            # Eğer en çok yükselenler listesindeyse
+            if gainer_rank and gainer_rank <= 50:
+                text += f"🏆 En Çok Yükselenler: {gainer_rank}. sırada\n"
+            
+            # Eğer en çok düşenler listesindeyse
+            if loser_rank and loser_rank <= 50:
+                text += f"📉 En Çok Düşenler: {loser_rank}. sırada\n"
+            
+            # Orta bölgedeyse
+            if (not gainer_rank or gainer_rank > 50) and (not loser_rank or loser_rank > 50):
+                text += f"⚖️ Dengeli bölgede (Normal performans)\n"
+            
+            return text
+            
+        except Exception as e:
+            print(f"Market pozisyon metni oluştururken hata: {str(e)}")
+            return ""
+    
+    def check_signal_strength(self, coin, alarm):
+        """
+        5m ve 1m timeframe'lerinde sinyal gücünü kontrol eder
+        Her ikisi de minimum seviyede (60) olmalı
+        Returns: (bool, str) - (geçti_mi, açıklama_mesajı)
+        """
+        try:
+            # 5m ve 1m verilerini al
+            df_5m = self.get_coin_data(coin, "5m")
+            df_1m = self.get_coin_data(coin, "1m")
+            
+            if df_5m is None or df_1m is None:
+                print("⚠️ 5m veya 1m verisi alınamadı, güvenlik kontrolü atlanıyor")
+                return True, "Veri alınamadı"
+            
+            # İndikatör değerlerini hesapla
+            wt1_5m = self.calculate_indicator_value(alarm, df_5m)
+            wt1_1m = self.calculate_indicator_value(alarm, df_1m)
+            
+            if wt1_5m is None or wt1_1m is None:
+                print("⚠️ İndikatör hesaplanamadı, güvenlik kontrolü atlanıyor")
+                return True, "Hesaplama hatası"
+            
+            print(f"\n🛡️ GÜVENLİK KONTROLÜ:")
+            print(f"5m WT1: {wt1_5m:.2f}")
+            print(f"1m WT1: {wt1_1m:.2f}")
+            
+            # Ana sinyalin yönünü belirle (LONG mu SHORT mu)
+            main_df = self.get_coin_data(coin, alarm['timeframe'])
+            main_wt1 = self.calculate_indicator_value(alarm, main_df)
+            
+            if main_wt1 is None:
+                return True, "Ana sinyal hesaplanamadı"
+            
+            # LONG sinyali kontrolü
+            if main_wt1 <= -60:
+                signal_direction = "LONG"
+                # Her ikisi de -60 veya altında olmalı
+                condition_5m = wt1_5m <= -60
+                condition_1m = wt1_1m <= -60
+                
+                if condition_5m and condition_1m:
+                    print(f"✅ Güvenlik Geçti: Her iki timeframe de LONG yönünde")
+                    return True, "Güvenli"
+                elif not condition_5m and not condition_1m:
+                    print(f"❌ Güvenlik Reddedildi: 5m ({wt1_5m:.2f}) ve 1m ({wt1_1m:.2f}) yeterli güçte değil (en az -60 olmalı)")
+                    return False, f"5m ve 1m yeterli güçte değil"
+                elif not condition_5m:
+                    print(f"❌ Güvenlik Reddedildi: 5m ({wt1_5m:.2f}) yeterli güçte değil (en az -60 olmalı)")
+                    return False, f"5m yeterli güçte değil"
+                else:  # not condition_1m
+                    print(f"❌ Güvenlik Reddedildi: 1m ({wt1_1m:.2f}) yeterli güçte değil (en az -60 olmalı)")
+                    return False, f"1m yeterli güçte değil"
+            
+            # SHORT sinyali kontrolü
+            elif main_wt1 >= 60:
+                signal_direction = "SHORT"
+                # Her ikisi de +60 veya üstünde olmalı
+                condition_5m = wt1_5m >= 60
+                condition_1m = wt1_1m >= 60
+                
+                if condition_5m and condition_1m:
+                    print(f"✅ Güvenlik Geçti: Her iki timeframe de SHORT yönünde")
+                    return True, "Güvenli"
+                elif not condition_5m and not condition_1m:
+                    print(f"❌ Güvenlik Reddedildi: 5m ({wt1_5m:.2f}) ve 1m ({wt1_1m:.2f}) yeterli güçte değil (en az +60 olmalı)")
+                    return False, f"5m ve 1m yeterli güçte değil"
+                elif not condition_5m:
+                    print(f"❌ Güvenlik Reddedildi: 5m ({wt1_5m:.2f}) yeterli güçte değil (en az +60 olmalı)")
+                    return False, f"5m yeterli güçte değil"
+                else:  # not condition_1m
+                    print(f"❌ Güvenlik Reddedildi: 1m ({wt1_1m:.2f}) yeterli güçte değil (en az +60 olmalı)")
+                    return False, f"1m yeterli güçte değil"
+            
+            # Nötr bölge
+            else:
+                print(f"⚪ Ana sinyal nötr bölgede ({main_wt1:.2f}), güvenlik kontrolü atlanıyor")
+                return True, "Nötr bölge"
+                
+        except Exception as e:
+            print(f"⚠️ Güvenlik kontrolü hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Hata durumunda sinyali engelleme, devam et
+            return True, f"Kontrol hatası: {str(e)}"
+    
+    def check_volatility_risk(self, coin, signal_direction):
+        """
+        Volatilite kontrolü: Aşırı yükselen/düşen coinlere ters işlem yapma
+        Returns: (bool, str) - (geçti_mi, açıklama_mesajı)
+        """
+        try:
+            print(f"\n📊 VOLATİLİTE KONTROLÜ:")
+            
+            # Market pozisyonunu al
+            position = self.get_coin_market_position(coin)
+            if not position:
+                print("⚠️ Market pozisyonu alınamadı, volatilite kontrolü atlanıyor")
+                return True, "Veri alınamadı"
+            
+            change_24h = position['change_24h']
+            gainer_rank = position['gainer_rank']
+            loser_rank = position['loser_rank']
+            
+            print(f"24h Değişim: {change_24h:+.2f}%")
+            if gainer_rank:
+                print(f"Yükselenler sırası: {gainer_rank}")
+            if loser_rank:
+                print(f"Düşenler sırası: {loser_rank}")
+            
+            # LONG sinyali kontrolü
+            if signal_direction == "LONG":
+                # En çok düşenler listesinde ilk 10'daysa riskli
+                if loser_rank and loser_rank <= 10:
+                    print(f"❌ VOLATİLİTE RİSKİ: Coin en çok düşenler listesinde {loser_rank}. sırada!")
+                    print(f"   Düşüş: {change_24h:.2f}% - Daha fazla düşebilir (düşen bıçak)")
+                    return False, f"Çok düşmüş (#{loser_rank}), LONG riskli"
+                
+                print(f"✅ Volatilite OK: LONG için güvenli")
+                return True, "Güvenli"
+            
+            # SHORT sinyali kontrolü
+            elif signal_direction == "SHORT":
+                # En çok yükselenler listesinde ilk 10'daysa riskli
+                if gainer_rank and gainer_rank <= 10:
+                    print(f"❌ VOLATİLİTE RİSKİ: Coin en çok yükselenler listesinde {gainer_rank}. sırada!")
+                    print(f"   Yükseliş: {change_24h:.2f}% - Momentum güçlü, SHORT riskli")
+                    return False, f"Çok yükselmiş (#{gainer_rank}), SHORT riskli"
+                
+                print(f"✅ Volatilite OK: SHORT için güvenli")
+                return True, "Güvenli"
+            
+            return True, "Nötr"
+                
+        except Exception as e:
+            print(f"⚠️ Volatilite kontrolü hatası: {str(e)}")
+            traceback.print_exc()
+            # Hata durumunda sinyali engelleme, devam et
+            return True, f"Kontrol hatası: {str(e)}"
+    
+    def check_spam_prevention(self, coin):
+        """
+        Spam önleme: Aynı coin'den 30 dakikada bir sinyal
+        Returns: (bool, str) - (geçti_mi, açıklama_mesajı)
+        """
+        try:
+            print(f"\n🚫 SPAM KONTROLÜ:")
+            
+            current_time = datetime.now()
+            
+            # Bu coin'den daha önce sinyal gönderilmiş mi?
+            if coin in self.last_signal_times:
+                last_signal_time = self.last_signal_times[coin]
+                time_diff = (current_time - last_signal_time).total_seconds() / 60  # dakika
+                
+                print(f"Son sinyal: {time_diff:.1f} dakika önce")
+                
+                # 30 dakikadan az süre geçmişse
+                if time_diff < 30:
+                    print(f"❌ SPAM ENGEL: Son sinyal {time_diff:.1f} dakika önce!")
+                    print(f"   En az 30 dakika beklenmeli")
+                    return False, f"Son sinyal {time_diff:.0f} dk önce"
+                
+                print(f"✅ Spam OK: {time_diff:.1f} dakika geçmiş")
+            else:
+                print(f"✅ Spam OK: Bu coin'den ilk sinyal")
+            
+            return True, "Güvenli"
+                
+        except Exception as e:
+            print(f"⚠️ Spam kontrolü hatası: {str(e)}")
+            traceback.print_exc()
+            # Hata durumunda sinyali engelleme, devam et
+            return True, f"Kontrol hatası: {str(e)}"
+    
+    def update_last_signal_time(self, coin):
+        """
+        Sinyal gönderildikten sonra zamanı kaydet
+        """
+        self.last_signal_times[coin] = datetime.now()
+        print(f"📝 Son sinyal zamanı kaydedildi: {coin}")
+
+    def update_btc_prices(self):
+        """Her 15 saniyede bir BTC fiyatlarını günceller"""
+        try:
+            # 1 dakikalık mumlardan veri al
+            df = self.get_coin_data('BTCUSDT', '1m')
+            if df is None or df.empty:
+                return
+                
+            current_time = datetime.now()
+            current_price = df['close'].iloc[-1]
+            
+            # Şu anki zamanı dakika başına yuvarla
+            rounded_time = current_time.replace(second=0, microsecond=0)
+            
+            # Fiyatı kaydet
+            self.btc_prices[rounded_time] = current_price
+            
+            # 1 saatten eski verileri temizle
+            cutoff_time = rounded_time - timedelta(hours=1)
+            self.btc_prices = {k: v for k, v in self.btc_prices.items() if k >= cutoff_time}
+            
+            # Fiyatları dosyaya kaydet
+            self.save_btc_prices()
+            
+        except Exception as e:
+            print(f"BTC fiyat güncelleme hatası: {str(e)}")
+
+    def show_alarm_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Alarm Kur")
+        dialog.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Coin seçimi
+        coin_layout = QHBoxLayout()
+        coin_label = QLabel("Coin Adı:")
+        coin_combo = QComboBox()
+        saved_coins = self.load_saved_coins()
+        if saved_coins:
+            coin_combo.addItems(saved_coins)
+        coin_layout.addWidget(coin_label)
+        coin_layout.addWidget(coin_combo)
+        layout.addLayout(coin_layout)
+        
+        # Zaman dilimi seçimi
+        time_layout = QHBoxLayout()
+        time_label = QLabel("Zaman Dilimi:")
+        time_combo = QComboBox()
+        timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+        time_combo.addItems(timeframes)
+        time_layout.addWidget(time_label)
+        time_layout.addWidget(time_combo)
+        layout.addLayout(time_layout)
+        
+        # İndikatör seçimi
+        indicator_layout = QHBoxLayout()
+        indicator_label = QLabel("İndikatör:")
+        indicator_combo = QComboBox()
+        indicators = ["İndicPro", "MACD", "Bollinger", "Volume Weighted MACD"]
+        indicator_combo.addItems(indicators)
+        indicator_layout.addWidget(indicator_label)
+        indicator_layout.addWidget(indicator_combo)
+        layout.addLayout(indicator_layout)
+        
+        # İndikatör detay seçimi
+        detail_layout = QHBoxLayout()
+        detail_label = QLabel("İndikatör Detay:")
+        detail_combo = QComboBox()
+        detail_layout.addWidget(detail_label)
+        detail_layout.addWidget(detail_combo)
+        layout.addLayout(detail_layout)
+        
+        # Koşul ve değer
+        condition_layout = QHBoxLayout()
+        condition_combo = QComboBox()
+        value_edit = QLineEdit()
+        value_edit.setPlaceholderText("Değer")
+        condition_layout.addWidget(condition_combo)
+        condition_layout.addWidget(value_edit)
+        layout.addLayout(condition_layout)
+        
+        # Tekrar seçenekleri
+        repeat_layout = QHBoxLayout()
+        repeat_group = QButtonGroup(dialog)
+        once_radio = QRadioButton("Tek Sefer")
+        always_radio = QRadioButton("Her Zaman")
+        once_radio.setChecked(True)
+        repeat_group.addButton(once_radio)
+        repeat_group.addButton(always_radio)
+        repeat_layout.addWidget(once_radio)
+        repeat_layout.addWidget(always_radio)
+        layout.addLayout(repeat_layout)
+        
+        # Son kullanma tarihi
+        expiry_layout = QHBoxLayout()
+        expiry_label = QLabel("Son Kullanma:")
+        date_edit = QDateTimeEdit(QDateTime.currentDateTime())
+        date_edit.setCalendarPopup(True)
+        expiry_layout.addWidget(expiry_label)
+        expiry_layout.addWidget(date_edit)
+        layout.addLayout(expiry_layout)
+        
+        # Alarm ismi
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Alarm İsmi:")
+        name_edit = QLineEdit()
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(name_edit)
+        layout.addLayout(name_layout)
+        
+        # Alarm mesajı
+        message_layout = QHBoxLayout()
+        message_label = QLabel("Alarm Mesajı:")
+        message_edit = QTextEdit()
+        message_edit.setMaximumHeight(100)
+        message_layout.addWidget(message_label)
+        message_layout.addWidget(message_edit)
+        layout.addLayout(message_layout)
+        
+        # Kaydet butonu
+        save_button = QPushButton("Kaydet")
+        save_button.clicked.connect(lambda: self.save_alarm(
+            dialog, coin_combo.currentText(), time_combo.currentText(),
+            indicator_combo.currentText(), detail_combo.currentText(),
+            condition_combo.currentText(), value_edit.text(),
+            once_radio.isChecked(), date_edit.dateTime(),
+            name_edit.text(), message_edit.toPlainText()
+        ))
+        layout.addWidget(save_button)
+        
+        # İndikatör değiştiğinde detay seçeneklerini güncelle
+        def update_detail_options():
+            detail_combo.clear()
+            indicator = indicator_combo.currentText()
+            if indicator == "İndicPro":
+                detail_combo.addItems(["Ana Çizgi", "Sinyal Çizgisi"])  
+            elif indicator == "MACD":
+                detail_combo.addItems(["MACD", "Sinyal", "Histogram"])
+            elif indicator == "Bollinger":
+                detail_combo.addItems(["Üst Bant", "Orta Bant", "Alt Bant"])
+                # Bollinger seçildiğinde değer alanını devre dışı bırak
+                value_edit.setEnabled(False)
+                value_edit.setPlaceholderText("Bollinger için değer otomatik alınacak")
+            elif indicator == "Volume Weighted MACD":
+                detail_combo.addItems(["VW MACD", "VW Signal", "VW Histogram"])
+                value_edit.setEnabled(True)
+                value_edit.setPlaceholderText("Değer girin")
+            
+            # Bollinger dışındaki indikatörler için değer alanını aktif et
+            if indicator != "Bollinger":
+                value_edit.setEnabled(True)
+                value_edit.setPlaceholderText("Değer girin")
+        
+        # Koşulları güncelle
+        def update_conditions():
+            condition_combo.clear()
+            condition_combo.addItems(["Üstüne Çıktığında", "Altına Düştüğünde", "Eşit Olduğunda"])
+        
+        indicator_combo.currentTextChanged.connect(update_detail_options)
+        update_detail_options()
+        update_conditions()
+        
+        # Dark theme
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+                color: white;
+            }
+            QLabel {
+                color: white;
+            }
+            QComboBox {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: url(down_arrow.png);
+                width: 12px;
+                height: 12px;
+            }
+            QLineEdit, QTextEdit {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QPushButton {
+                background-color: #2962ff;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+            QRadioButton {
+                color: white;
+            }
+            QDateTimeEdit {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                padding: 5px;
+                border-radius: 3px;
+            }
+        """)
+        
+        dialog.exec()
+    
+    def save_alarm(self, dialog, coin, timeframe, indicator, detail, condition, value, is_once, expiry, name, message):
+        if not name:
+            QMessageBox.warning(dialog, "Hata", "Lütfen alarm ismi girin!")
+            return
+            
+        if not message:
+            QMessageBox.warning(dialog, "Hata", "Lütfen alarm mesajı girin!")
+            return
+        
+        # Alarm verilerini hazırla
+        alarm_data = {
+            "id": f"IndicSigs-ID:{int(time.time())}",  # Benzersiz ID eklendi
+            "coin": coin,
+            "timeframe": timeframe,
+            "indicator": indicator,
+            "detail": detail,
+            "condition": condition,
+            "value": value,
+            "is_once": is_once,
+            "expiry": expiry.strftime("%Y-%m-%d %H:%M:%S"),
+            "name": name,
+            "message": message
+        }        
+        
+        try:
+            # Önce lokalde kaydet
+            alarms = []
+            if os.path.exists("alarms.json"):
+                with open("alarms.json", "r") as f:
+                    alarms = json.load(f)
+
+            
+            alarms.append(alarm_data)
+            
+
+            with open("alarms.json", "w") as f:
+                json.dump(alarms, f)
+            
+            # Eğer kullanıcı giriş yapmışsa backend'e de kaydet
+            if self.token and self.user:
+                response = requests.post(
+                    f"{API_URL}/api/alarms",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=alarm_data
+                )
+                
+                if response.status_code != 200:
+                    print(f"Alarm backend'e kaydedilemedi: {response.text}")
+            
+            # Bildirim gönderme kısmını kaldırdım
+            
+            QMessageBox.information(dialog, "Başarılı", "Alarm başarıyla kaydedildi!")
+            dialog.accept()
+            
+        except Exception as e:
+            QMessageBox.warning(dialog, "Hata", f"Alarm kaydedilirken hata oluştu: {str(e)}")
+            
+    def show_alarms(self):
+        if not os.path.exists("alarms.json"):
+            QMessageBox.information(self, "Bilgi", "Henüz kayıtlı alarm bulunmuyor!")
+            return
+            
+        try:
+            with open("alarms.json", "r") as f:
+                alarms = json.load(f)
+                
+            if not alarms:  # Alarm yoksa
+                QMessageBox.information(self, "Bilgi", "Henüz kayıtlı alarm bulunmuyor!")
+                return
+                
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Alarmlar")
+            dialog.setMinimumWidth(800)
+            dialog.setMinimumHeight(600)
+            layout = QVBoxLayout(dialog)
+            
+            # Başlık ve butonlar için üst kısım
+            top_layout = QHBoxLayout()
+            
+            # Başlık
+            title_label = QLabel("Kayıtlı Alarmlar")
+            title_label.setStyleSheet("""
+                QLabel {
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: #2962ff;
+                    padding: 10px;
+                }
+            """)
+            top_layout.addWidget(title_label)
+            
+            # Tümünü Sil butonu
+            delete_all_button = QPushButton("Tümünü Sil")
+            delete_all_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #d32f2f;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    margin-right: 10px;
+                }
+                QPushButton:hover {
+                    background-color: #b71c1c;
+                }
+                QPushButton:pressed {
+                    background-color: #c62828;
+                }
+                QPushButton:disabled {
+                    background-color: #666666;
+                }
+            """)
+            top_layout.addWidget(delete_all_button, alignment=Qt.AlignmentFlag.AlignRight)
+            
+            layout.addLayout(top_layout)
+            
+            # Arama kutusu
+            search_input = QLineEdit()
+            search_input.setPlaceholderText("Alarm ara (coin, indikatör, detay...)")
+            search_input.setStyleSheet("""
+                QLineEdit {
+                    padding: 8px;
+                    border: 2px solid #424242;
+                    border-radius: 4px;
+                    background-color: #2d2d2d;
+                    color: white;
+                    font-size: 14px;
+                    margin: 0px 10px 10px 10px;
+                }
+                QLineEdit:focus {
+                    border: 2px solid #2962ff;
+                }
+            """)
+            layout.addWidget(search_input)
+            
+            # Alarm listesi için scroll area
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setStyleSheet("""
+                QScrollArea {
+                    border: none;
+                    background-color: transparent;
+                }
+                QScrollBar:vertical {
+                    border: none;
+                    background: #2d2d2d;
+                    width: 10px;
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #4d4d4d;
+                    min-height: 20px;
+                    border-radius: 5px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    border: none;
+                }
+            """)
+            
+            # Alarmları gösterecek widget
+            alarms_widget = QWidget()
+            alarms_layout = QVBoxLayout(alarms_widget)
+            alarms_layout.setSpacing(10)
+            
+            all_alarm_cards = []
+            
+            for alarm in alarms:
+                # Her alarm için kart benzeri bir widget
+                alarm_card = QFrame()
+                alarm_card.setObjectName("alarmCard")
+                alarm_card.setStyleSheet("""
+                    QFrame#alarmCard {
+                        background-color: #2C2C2C;
+                        border-radius: 10px;
+                        margin: 5px;
+                        padding: 10px;
+                        border: 1px solid #3C3C3C;
+                    }
+                    QFrame#alarmCard[triggered="true"] {
+                        background-color: #4C2C2C;
+                        border: 2px solid #FF4444;
+                    }
+                """)
+                
+                card_layout = QVBoxLayout(alarm_card)
+                
+                # Üst kısım: Alarm adı ve silme butonu
+                header_layout = QHBoxLayout()
+                
+                # Başlık
+                title_label = QLabel(f"<b>{alarm['name']}</b>")
+                title_label.setStyleSheet("""
+                    QLabel {
+                        color: white;
+                        font-size: 14px;
+                    }
+                """)
+                header_layout.addWidget(title_label)
+                
+                # Sil butonu
+                delete_button = QPushButton("Sil")
+                delete_button.setFixedWidth(60)
+                delete_button.clicked.connect(lambda checked, a=alarm, card=alarm_card: self.delete_alarm_card(a, card, alarms_widget))
+                header_layout.addWidget(delete_button, alignment=Qt.AlignmentFlag.AlignRight)
+                card_layout.addLayout(header_layout)
+                
+                # Orta kısım: Alarm detayları
+                details_layout = QGridLayout()
+                details_layout.addWidget(QLabel(f"Coin: {alarm['coin']}"), 0, 0)
+                details_layout.addWidget(QLabel(f"Zaman Dilimi: {alarm['timeframe']}"), 0, 1)
+                details_layout.addWidget(QLabel(f"İndikatör: {alarm['indicator']}"), 1, 0)
+                details_layout.addWidget(QLabel(f"Detay: {alarm['detail']}"), 1, 1)
+                details_layout.addWidget(QLabel(f"Koşul: {alarm['condition']}"), 2, 0)
+                details_layout.addWidget(QLabel(f"Değer: {alarm['value']}"), 2, 1)
+                details_layout.addWidget(QLabel(f"Tekrar: {'Tek Sefer' if alarm['is_once'] else 'Her Zaman'}"), 3, 0)
+                details_layout.addWidget(QLabel(f"Son: {alarm['expiry']}"), 3, 1)
+                card_layout.addLayout(details_layout)
+                
+                # Alt kısım: Alarm mesajı
+                message_label = QLabel(f"Mesaj: {alarm['message']}")
+                message_label.setStyleSheet("""
+                    QLabel {
+                        color: white;
+                    }
+                """)
+                message_label.setWordWrap(True)
+                card_layout.addWidget(message_label)
+                
+                alarms_layout.addWidget(alarm_card)
+                all_alarm_cards.append((alarm_card, alarm))
+            
+            alarms_layout.addStretch()
+            scroll_area.setWidget(alarms_widget)
+            layout.addWidget(scroll_area)
+            
+            # Tümünü Sil butonunun işlevi
+            def delete_all_alarms():
+                reply = QMessageBox.question(dialog, "Onay", 
+                                          "Tüm alarmları silmek istediğinizden emin misiniz?",
+                                          QMessageBox.Yes | QMessageBox.No)
+                
+                if reply == QMessageBox.Yes:
+                    try:
+                        # Tüm alarmları sil
+                        with open("alarms.json", "w") as f:
+                            json.dump([], f)
+                        
+                        # UI'dan kaldır
+                        dialog.close()
+                        QMessageBox.information(dialog, "Bilgi", "Tüm alarmlar başarıyla silindi!")
+                        self.show_alarms()  # Pencereyi yenile
+                    except Exception as e:
+                        QMessageBox.warning(dialog, "Hata", f"Alarmlar silinirken hata oluştu: {str(e)}")
+            
+            delete_all_button.clicked.connect(delete_all_alarms)
+            
+            # Arama fonksiyonu
+            def filter_alarms(text):
+                search_text = text.lower()
+                for card, alarm in all_alarm_cards:
+                    try:
+                        searchable_text = (
+                            f"{alarm['name']} {alarm['coin']} {alarm['timeframe']} "
+                            f"{alarm['indicator']} {alarm['detail']} {alarm['condition']} "
+                            f"{alarm['value']} {alarm['message']}"
+                        ).lower()
+                        card.setVisible(search_text in searchable_text)
+                    except Exception:
+                        continue
+            
+            # Arama kutusuna yazıldıkça filtreleme yap
+            search_input.textChanged.connect(filter_alarms)
+            
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #1a1a1a;
+                }
+            """)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Hata", f"Alarmlar yüklenirken hata oluştu: {str(e)}")
+            
+    def delete_alarm_card(self, alarm, card, parent_widget):
+        reply = QMessageBox.question(
+            self,
+            "Alarm Sil",
+            f"{alarm['name']} alarmını silmek istediğinizden emin misiniz?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # JSON dosyasından sil
+                alarms = []
+                if os.path.exists("alarms.json"):
+                    with open("alarms.json", "r") as f:
+                        alarms = json.load(f)
+
+                
+                alarms = [a for a in alarms if a.get('id', '') != alarm.get('id', '')]
+                
+
+                with open("alarms.json", "w") as f:
+                    json.dump(alarms, f)
+                
+                # Kartı arayüzden kaldır
+                card.deleteLater()
+                
+                # Eğer hiç alarm kalmadıysa pencereyi kapat
+                if not alarms:
+                    parent_widget.window().close()
+                
+                QMessageBox.information(self, "Başarılı", "Alarm başarıyla silindi!")
+            except Exception as e:
+                QMessageBox.warning(self, "Hata", f"Alarm silinirken hata oluştu: {str(e)}")
+
+    def calculate_indicator_value(self, alarm, df):
+        """Verilen alarm ve veri için indikatör değerini hesapla"""
+        if df is None or df.empty:
+            return None
+            
+        if alarm["indicator"] == "İndicPro":
+            wt_result = calculate_wavetrend(df)
+            if alarm["detail"] == "Ana Çizgi":
+                return wt_result['wt1']
+            elif alarm["detail"] == "Sinyal Çizgisi":
+                return wt_result['wt2']
+                
+        elif alarm["indicator"] == "MACD":
+            macd_result = calculate_macd_dema(df)
+            if alarm["detail"] == "MACD Çizgisi":
+                return macd_result['MACD_DEMA']
+            elif alarm["detail"] == "Sinyal Çizgisi":
+                return macd_result['Signal_DEMA']
+            elif alarm["detail"] == "Histogram":
+                return macd_result['MACD_Hist_DEMA']
+                
+        elif alarm["indicator"] == "Bollinger":
+            bb_data = calculate_bollinger_bands(df)
+            if alarm["detail"] == "Üst Bant":
+                return bb_data['BB_upper']
+            elif alarm["detail"] == "Orta Bant":
+                return bb_data['BB_middle']
+            elif alarm["detail"] == "Alt Bant":
+                return bb_data['BB_lower']
+                
+        return None
+
+    def check_all_alarms(self):
+        """Tüm kayıtlı alarmları kontrol et"""
+        if not os.path.exists("alarms.json"):
+            return
+            
+        try:
+            with open("alarms.json", "r") as f:
+                alarms = json.load(f)
+                
+            if not alarms:  # Alarm yoksa
+                return
+                
+            print(f"\n{'='*50}")
+            print(f"Toplam {len(alarms)} alarm kontrol ediliyor")
+            print(f"{'='*50}\n")
+            
+            # Her alarm için ayrı kontrol yap
+            for alarm in alarms:
+                try:
+                    # Eğer alarm zaten tetiklendiyse ve tek seferlik ise atla
+                    if alarm.get('triggered', False) and alarm.get('is_once', True):
+                        print(f"Alarm '{alarm['name']}' zaten tetiklenmiş ve tek seferlik, atlanıyor.")
+                        continue
+                    
+                    coin = alarm['coin']
+                    timeframe = alarm['timeframe']
+                    
+                    print(f"\n{'*'*30}")
+                    print(f"Alarm Kontrol: {alarm['name']}")
+                    print(f"Coin: {coin}, Timeframe: {timeframe}")
+                    print(f"İndikatör: {alarm['indicator']} ({alarm['detail']})")
+                    print(f"Koşul: {alarm['condition']}, Hedef: {alarm['value']}")
+                    print(f"{'*'*30}\n")
+                    
+                    # Coin verilerini al
+                    df = self.get_coin_data(coin, timeframe)
+                    if df is None:
+                        print(f"Coin verisi alınamadı: {coin}")
+                        continue
+                        
+                    # Her alarm için benzersiz bir anahtar oluştur
+                    alarm_key = f"{alarm['name']}_{alarm['coin']}_{alarm['timeframe']}_{alarm['indicator']}_{alarm['detail']}_{alarm['condition']}_{alarm['value']}"
+                    triggered = False
+                    current_value = None
+                    previous_value = self.previous_values.get(alarm_key, None)
+                    
+                    print(f"Alarm anahtarı: {alarm_key}")
+                    print(f"Önceki değer: {previous_value}")
+                    
+                    # İndikatör değerlerini al
+                    if alarm["indicator"] == "İndicPro":
+                        wt_result = calculate_wavetrend(df)
+                        wt1, wt2 = wt_result['wt1'], wt_result['wt2']
+                        print(f"İndicPro değerleri - WT1: {wt1:.2f}, WT2: {wt2:.2f}")
+                        
+                        if alarm["detail"] == "Ana Çizgi":
+                            current_value = wt1
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                        elif alarm["detail"] == "Sinyal Çizgisi":
+                            current_value = wt2
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                        elif alarm["detail"] == "Kesişim":
+                            if alarm["condition"] == "Yukarı Kesişim":
+                                triggered = wt1 > wt2 and (previous_value is None or wt1 <= wt2)
+                                print(f"Yukarı Kesişim kontrolü:")
+                                print(f"WT1 > WT2: {wt1} > {wt2} = {wt1 > wt2}")
+                            elif alarm["condition"] == "Aşağı Kesişim":
+                                triggered = wt1 < wt2 and (previous_value is None or wt1 >= wt2)
+                                print(f"Aşağı Kesişim kontrolü:")
+                                print(f"WT1 < WT2: {wt1} < {wt2} = {wt1 < wt2}")
+                    
+                    elif alarm["indicator"] == "MACD":
+                        macd_result = calculate_macd_dema(df)
+                        macd_line, signal_line, hist = macd_result['MACD_DEMA'], macd_result['Signal_DEMA'], macd_result['MACD_Hist_DEMA']
+                        print(f"MACD değerleri - MACD: {macd_line:.2f}, Signal: {signal_line:.2f}, Hist: {hist:.2f}")
+                        
+                        if alarm["detail"] == "MACD Çizgisi":
+                            current_value = macd_line
+                        elif alarm["detail"] == "Sinyal Çizgisi":
+                            current_value = signal_line
+                        elif alarm["detail"] == "Histogram":
+                            current_value = hist
+                        elif alarm["detail"] == "Kesişim":
+                            if alarm["condition"] == "Yukarı Kesişim":
+                                triggered = macd_line > signal_line and (previous_value is None or macd_line <= signal_line)
+                                print(f"MACD Yukarı Kesişim kontrolü:")
+                                print(f"MACD > Signal: {macd_line} > {signal_line} = {macd_line > signal_line}")
+                            elif alarm["condition"] == "Aşağı Kesişim":
+                                triggered = macd_line < signal_line and (previous_value is None or macd_line >= signal_line)
+                                print(f"MACD Aşağı Kesişim kontrolü:")
+                                print(f"MACD < Signal: {macd_line} < {signal_line} = {macd_line < signal_line}")
+                                
+                        if not triggered and alarm["detail"] != "Kesişim":
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                    
+                    elif alarm["indicator"] == "Bollinger":
+                        try:
+                            bb_data = calculate_bollinger_bands(df)
+                            current_price = df['close'].iloc[-1]
+                            
+                            # Seçilen banda göre değeri al
+                            if alarm["detail"] == "Üst Bant":
+                                band_value = bb_data['BB_upper']
+                            elif alarm["detail"] == "Orta Bant":
+                                band_value = bb_data['BB_middle']
+                            elif alarm["detail"] == "Alt Bant":
+                                band_value = bb_data['BB_lower']
+                            else:
+                                print(f"Geçersiz Bollinger bandı detayı: {alarm['detail']}")
+                                continue
+                            
+                            print(f"Bollinger {alarm['detail']} kontrolü:")
+                            print(f"Mevcut Fiyat: {current_price:.8f}")
+                            print(f"Bant Değeri: {band_value:.8f}")
+                            
+                            # Koşula göre kontrol et
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_price > band_value and (previous_value is None or previous_value <= band_value)
+                                print(f"Üstüne Çıktığında kontrolü: {current_price:.2f} > {band_value:.2f} = {triggered}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_price < band_value and (previous_value is None or previous_value >= band_value)
+                                print(f"Altına Düştüğünde kontrolü: {current_price:.2f} < {band_value:.2f} = {triggered}")
+                            elif alarm["condition"] == "Eşit Olduğunda":
+                                # Eşitlik için küçük bir tolerans kullan
+                                tolerance = band_value * 0.0001  # %0.01 tolerans
+                                triggered = abs(current_price - band_value) <= tolerance
+                                print(f"Eşit Olduğunda kontrolü: |{current_price:.2f} - {band_value:.2f}| <= {tolerance:.2f} = {triggered}")
+                            
+                            current_value = current_price
+                            
+                        except Exception as e:
+                            print(f"Bollinger alarm kontrolünde hata: {str(e)}")
+                            traceback.print_exc()
+                            continue
+                    elif alarm["indicator"] == "Volume Weighted MACD":
+                        vwmacd_result = {
+                            'macd': (df['volume'] * df['close']).ewm(span=12, adjust=False).mean() / df['volume'].ewm(span=12, adjust=False).mean() - \
+                                   (df['volume'] * df['close']).ewm(span=26, adjust=False).mean() / df['volume'].ewm(span=26, adjust=False).mean(),
+                            'signal': None,
+                            'histogram': None
+                        }
+                        
+                        # Sinyal ve histogram hesapla
+                        vwmacd_result['signal'] = vwmacd_result['macd'].ewm(span=9, adjust=False).mean()
+                        vwmacd_result['histogram'] = vwmacd_result['macd'] - vwmacd_result['signal']
+                        
+                        if alarm["detail"] == "VW MACD":
+                            current_value = vwmacd_result['macd'].iloc[-1]
+                        elif alarm["detail"] == "VW Signal":
+                            current_value = vwmacd_result['signal'].iloc[-1]
+                        elif alarm["detail"] == "VW Histogram":
+                            current_value = vwmacd_result['histogram'].iloc[-1]
+                            
+                        target = float(alarm["value"])
+                        if alarm["condition"] == "Üstüne Çıktığında":
+                            triggered = current_value > target and (previous_value is None or previous_value <= target)
+                            print(f"Üstüne Çıktığında kontrolü:")
+                            print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                            print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                        elif alarm["condition"] == "Altına Düştüğünde":
+                            triggered = current_value < target and (previous_value is None or previous_value >= target)
+                            print(f"Altına Düştüğünde kontrolü:")
+                            print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                            print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                    
+                    # Mevcut değeri kaydet
+                    if current_value is not None:
+                        self.previous_values[alarm_key] = current_value
+                    
+                    print(f"\nAlarm durumu: {'Tetiklendi' if triggered else 'Tetiklenmedi'}\n")
+                    
+                    # Alarm tetiklendiyse
+                    if triggered:
+                        # Ana sinyalin yönünü belirle (LONG mu SHORT mu)
+                        main_df = self.get_coin_data(coin, alarm['timeframe'])
+                        main_wt1 = self.calculate_indicator_value(alarm, main_df)
+                        
+                        if main_wt1 is None:
+                            print("⚠️ Ana sinyal hesaplanamadı, atlanıyor")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        # Sinyal yönünü belirle
+                        if main_wt1 <= -60:
+                            signal_direction = "LONG"
+                        elif main_wt1 >= 60:
+                            signal_direction = "SHORT"
+                        else:
+                            signal_direction = "NÖTR"
+                        
+                        print(f"\n{'='*60}")
+                        print(f"SİNYAL TETİKLENDİ: {coin} - {signal_direction}")
+                        print(f"{'='*60}")
+                        
+                        # 🛡️ KONTROL 1: 5m ve 1m timeframe'leri kontrol et
+                        security_passed, security_message = self.check_signal_strength(coin, alarm)
+                        
+                        if not security_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Güvenlik): {security_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 1 GEÇTİ: {security_message}")
+                        
+                        # 📊 KONTROL 2: Volatilite riski kontrol et
+                        volatility_passed, volatility_message = self.check_volatility_risk(coin, signal_direction)
+                        
+                        if not volatility_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Volatilite): {volatility_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 2 GEÇTİ: {volatility_message}")
+                        
+                        # 🚫 KONTROL 3: Spam kontrolü
+                        spam_passed, spam_message = self.check_spam_prevention(coin)
+                        
+                        if not spam_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Spam): {spam_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 3 GEÇTİ: {spam_message}")
+                        
+                        print(f"\n{'='*60}")
+                        print(f"🎯 TÜM KONTROLLER GEÇİLDİ - SİNYAL GÖNDERİLİYOR!")
+                        print(f"{'='*60}\n")
+                        
+                        # Windows alarm sesi çal (4 saniye)
+                        try:
+                            winsound.Beep(1000, 4000)  # 1000 Hz, 4000 ms (4 saniye)
+                        except:
+                            print("Ses çalınamadı")
+                        
+                        # Fiyat için ondalık basamak sayısını dinamik olarak hesapla
+                        current_price = df['close'].iloc[-1]
+                        decimal_count = len(str(current_price).split('.')[-1]) + 1
+                        
+                        # Fiyatı %0.05 düşür
+                        discounted_price = current_price * (1 - 0.0005)  # %0.05 düşük
+                        
+                        # Bildirim mesajını hazırla
+                        notification_message = f"🚨 {alarm['name']}\n\n"
+                        notification_message += f"💰 Coin: {coin}\n"
+                        notification_message += f"💵 Fiyat: {discounted_price:.{decimal_count}f} USDT\n"  # %0.05 düşük fiyat
+                        notification_message += f"📊 İndikatör: {alarm['indicator']} ({alarm['detail']})\n"
+                        notification_message += f"📈 Koşul: {alarm['condition']}\n"
+                        notification_message += f"🎯 Hedef: {alarm['value']}\n\n"
+                        
+                        # 24 saatlik performans bilgisi ekle
+                        market_position_text = self.format_market_position_text(coin)
+                        if market_position_text:
+                            notification_message += market_position_text + "\n"
+                        
+                        notification_message += f"⏱ Zaman Dilimleri:\n"                                                                        
+
+                        # Ana zaman dilimi (15m)
+                        main_timeframe_data = self.get_coin_data(coin, timeframe)
+                        main_result = self.calculate_indicator_value(alarm, main_timeframe_data)
+                        if main_result is not None:
+                            if main_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif main_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif main_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif main_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif main_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif main_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • {timeframe}: {main_result:.2f}{signal}\n"
+
+                        # 5 dakikalık veri
+                        five_min_data = self.get_coin_data(coin, "5m")
+                        if five_min_data is not None:
+                            five_min_result = self.calculate_indicator_value(alarm, five_min_data)
+                            if five_min_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif five_min_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif five_min_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif five_min_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif five_min_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif five_min_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • 5m: {five_min_result:.2f}{signal}\n"
+
+                        # 1 dakikalık veri
+                        one_min_data = self.get_coin_data(coin, "1m")
+                        if one_min_data is not None:
+                            one_min_result = self.calculate_indicator_value(alarm, one_min_data)
+                            if one_min_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif one_min_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif one_min_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif one_min_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif one_min_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif one_min_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • 1m: {one_min_result:.2f}{signal}\n"
+
+                        if 'message' in alarm and alarm['message']:
+                            notification_message += f"\n📝 Not: {alarm['message']}"                            
+
+                        # Bildirim ekle
+                        self.add_notification(notification_message)
+                        
+                        # Telegram'a gönder
+                        self.send_notification(notification_message)
+                        
+                        # Son sinyal zamanını kaydet (spam önleme için)
+                        self.update_last_signal_time(coin)
+                        
+                        # Alarm durumunu güncelle
+                        if alarm.get('is_once', True):
+                            alarm['triggered'] = True
+                            with open("alarms.json", "w") as f:
+                                json.dump(alarms, f)
+                
+                except Exception as e:
+                    print(f"Alarm kontrolünde hata: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Alarm kontrolünde genel hata: {e}")
+    
+    def update_alarm_status(self, alarm_name, triggered):
+        """Alarm durumunu güncelle"""
+        if alarm_name in self.alarm_cards:
+            card = self.alarm_cards[alarm_name]
+            status_label = card.findChild(QLabel, f"status_{alarm_name}")
+            
+            if triggered:
+                card.setProperty("triggered", "true")
+                status_label.setText("Durum: Tetiklendi!")
+                status_label.setStyleSheet("color: #FF4444; font-weight: bold;")
+            else:
+                card.setProperty("triggered", "false")
+                status_label.setText("Durum: Bekliyor")
+                status_label.setStyleSheet("color: #AAAAAA;")
+            
+            card.style().unpolish(card)
+            card.style().polish(card)
+
+    def create_alarm_card(self, alarm):
+        """Alarm kartı oluştur"""
+        card = QFrame()
+        card.setObjectName("alarmCard")
+        card.setStyleSheet("""
+            QFrame#alarmCard {
+                background-color: #2C2C2C;
+                border-radius: 10px;
+                margin: 5px;
+                padding: 10px;
+                border: 1px solid #3C3C3C;
+            }
+            QFrame#alarmCard[triggered="true"] {
+                background-color: #4C2C2C;
+                border: 2px solid #FF4444;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        
+        # Alarm adı
+        name_label = QLabel(f"<b>{alarm['name']}</b>")
+        name_label.setStyleSheet("color: white; font-size: 14px;")
+        layout.addWidget(name_label)
+        
+        # Tetiklenme durumu
+        status_label = QLabel("Durum: Bekliyor")
+        status_label.setObjectName(f"status_{alarm['name']}")
+        status_label.setStyleSheet("color: #AAAAAA;")
+        layout.addWidget(status_label)
+        
+        # Coin ve timeframe
+        coin_label = QLabel(f"Coin: {alarm['coin']} ({alarm['timeframe']})")
+        coin_label.setStyleSheet("color: #AAAAAA;")
+        layout.addWidget(coin_label)
+        
+        # İndikatör ve detay
+        indicator_label = QLabel(f"İndikatör: {alarm['indicator']} ({alarm['detail']})")
+        indicator_label.setStyleSheet("color: #AAAAAA;")
+        layout.addWidget(indicator_label)
+        
+        # Koşul ve değer
+        condition_label = QLabel(f"Koşul: {alarm['condition']}")
+        if 'value' in alarm:
+            condition_label.setText(f"Koşul: {alarm['condition']} ({alarm['value']})")
+        condition_label.setStyleSheet("color: #AAAAAA;")
+        layout.addWidget(condition_label)
+        
+        # Mesaj
+        if 'message' in alarm and alarm['message'] is not None:
+            message_label = QLabel(f"Mesaj: {alarm['message']}")
+            message_label.setStyleSheet("color: #AAAAAA;")
+            layout.addWidget(message_label)
+        
+        # Düğmeler için yatay layout
+        button_layout = QHBoxLayout()
+        
+        # Düzenle düğmesi
+        edit_button = QPushButton("Düzenle")
+        edit_button.setStyleSheet("""
+            QPushButton {
+                background-color: #007AFF;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #0056B3;
+            }
+        """)
+        edit_button.clicked.connect(lambda: self.edit_alarm(alarm))
+        button_layout.addWidget(edit_button)
+        
+        # Sil düğmesi
+        delete_button = QPushButton("Sil")
+        delete_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF3B30;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #D63029;
+            }
+        """)
+        delete_button.clicked.connect(lambda: self.delete_alarm(alarm))
+        button_layout.addWidget(delete_button)
+        
+        layout.addLayout(button_layout)
+        card.setLayout(layout)
+        
+        # Kartı alarm_cards sözlüğüne ekle
+        self.alarm_cards[alarm['name']] = card
+        
+        return card
+
+    def add_notification(self, message):
+        """Yeni bildirim ekle"""
+        self.notifications.insert(0, {"message": message, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+        self.update_notification_badge()
+
+    def update_notification_badge(self):
+        """Bildirim butonunda sayı göster"""
+        count = len(self.notifications)
+        if count > 0:
+            self.notifications_button.setText(f"Bildirimler ({count})")
+        else:
+            self.notifications_button.setText("Bildirimler")
+
+    def show_notifications(self):
+        """Bildirimleri gösteren dialog"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Bildirimler")
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Bildirim listesi
+        notification_list = QListWidget()
+        notification_list.setStyleSheet("""
+            QListWidget {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #3d3d3d;
+            }
+            QListWidget::item:selected {
+                background-color: #2962ff;
+            }
+        """)
+        
+        if not self.notifications:
+            notification_list.addItem("Bildirim bulunmuyor")
+        else:
+            for notif in self.notifications:
+                item_text = f"{notif['timestamp']}\n{notif['message']}"
+                item = QListWidgetItem(item_text)
+                notification_list.addItem(item)
+        
+        layout.addWidget(notification_list)
+        
+        # Temizle butonu
+        clear_button = QPushButton("Tüm Bildirimleri Temizle")
+        clear_button.clicked.connect(self.clear_notifications)
+        clear_button.clicked.connect(dialog.close)
+        clear_button.setEnabled(len(self.notifications) > 0)
+        
+        layout.addWidget(clear_button)
+        
+        # Dark theme
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+                color: white;
+            }
+            QPushButton {
+                background-color: #2962ff;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+            QPushButton:disabled {
+                background-color: #666666;
+            }
+        """)
+        
+        dialog.exec()
+
+    def clear_notifications(self):
+        """Tüm bildirimleri temizle"""
+        self.notifications.clear()
+        self.update_notification_badge()
+
+    def show_telegram_groups(self):
+        """Telegram grupları yönetim penceresini göster"""
+        dialog = TelegramGroupsDialog(self)
+        dialog.exec_()
+        
+    def test_telegram_group(self, chat_id):
+        """Belirli bir gruba test mesajı gönder"""
+        try:
+            test_message = "🔔 Test mesajı - IndicSigs"
+            
+            # Basit senkron yaklaşım - requests kullanarak
+            import requests
+            
+            telegram_url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
+            payload = {
+                'chat_id': chat_id,
+                'text': test_message
+            }
+            
+            response = requests.post(telegram_url, data=payload, timeout=30)
+            
+            if response.status_code == 200:
+                return True, "Test mesajı başarıyla gönderildi!"
+            else:
+                return False, f"Test mesajı gönderilirken hata: HTTP {response.status_code}"
+                
+        except Exception as e:
+            return False, f"Test mesajı gönderilirken hata: {str(e)}"
+            
+    def show_bulk_alarm_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Toplu Alarm Kur")
+        dialog.setMinimumWidth(500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Coin seçim bölümü
+        coin_group = QGroupBox("Coin Seçimi")
+        coin_layout = QVBoxLayout()
+        
+        # Tümünü seç checkbox
+        select_all = QCheckBox("Tümünü Seç")
+        coin_layout.addWidget(select_all)
+        
+        # Coin listesi
+        coin_list = QListWidget()
+        coin_list.setSelectionMode(QListWidget.MultiSelection)
+        saved_coins = self.load_saved_coins()
+        if saved_coins:
+            coin_list.addItems(saved_coins)
+        coin_layout.addWidget(coin_list)
+        
+        # Tümünü seç/kaldır fonksiyonu
+        def toggle_all_coins(state):
+            for i in range(coin_list.count()):
+                item = coin_list.item(i)
+                item.setSelected(state == Qt.Checked)
+        
+        select_all.stateChanged.connect(toggle_all_coins)
+        coin_group.setLayout(coin_layout)
+        layout.addWidget(coin_group)
+        
+        # Zaman dilimi seçimi
+        time_layout = QHBoxLayout()
+        time_label = QLabel("Zaman Dilimi:")
+        time_combo = QComboBox()
+        timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+        time_combo.addItems(timeframes)
+        time_layout.addWidget(time_label)
+        time_layout.addWidget(time_combo)
+        layout.addLayout(time_layout)
+        
+        # İndikatör seçimi
+        indicator_layout = QHBoxLayout()
+        indicator_label = QLabel("İndikatör:")
+        indicator_combo = QComboBox()
+        indicators = ["İndicPro", "MACD", "Bollinger", "Volume Weighted MACD"]
+        indicator_combo.addItems(indicators)
+        indicator_layout.addWidget(indicator_label)
+        indicator_layout.addWidget(indicator_combo)
+        layout.addLayout(indicator_layout)
+        
+        # İndikatör detay seçimi
+        detail_layout = QHBoxLayout()
+        detail_label = QLabel("İndikatör Detay:")
+        detail_combo = QComboBox()
+        detail_layout.addWidget(detail_label)
+        detail_layout.addWidget(detail_combo)
+        layout.addLayout(detail_layout)
+        
+        # Koşul ve değer
+        condition_layout = QHBoxLayout()
+        condition_combo = QComboBox()
+        value_edit = QLineEdit()
+        value_edit.setPlaceholderText("Değer")
+        condition_layout.addWidget(condition_combo)
+        condition_layout.addWidget(value_edit)
+        layout.addLayout(condition_layout)
+        
+        # Tekrar seçenekleri
+        repeat_layout = QHBoxLayout()
+        repeat_group = QButtonGroup(dialog)
+        once_radio = QRadioButton("Bir Kez")
+        repeat_radio = QRadioButton("Sürekli")
+        once_radio.setChecked(True)
+        repeat_group.addButton(once_radio)
+        repeat_group.addButton(repeat_radio)
+        repeat_layout.addWidget(once_radio)
+        repeat_layout.addWidget(repeat_radio)
+        layout.addLayout(repeat_layout)
+        
+        # Bitiş tarihi seçimi
+        expiry_layout = QHBoxLayout()
+        expiry_label = QLabel("Bitiş Tarihi:")
+        expiry_edit = QDateTimeEdit()
+        expiry_edit.setDateTime(datetime.now() + timedelta(days=1))
+        expiry_edit.setCalendarPopup(True)
+        expiry_layout.addWidget(expiry_label)
+        expiry_layout.addWidget(expiry_edit)
+        layout.addLayout(expiry_layout)
+        
+        # Alarm adı ve mesajı
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Alarm Adı:")
+        name_edit = QLineEdit()
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(name_edit)
+        layout.addLayout(name_layout)
+        
+        message_layout = QHBoxLayout()
+        message_label = QLabel("Mesaj:")
+        message_edit = QLineEdit()
+        message_layout.addWidget(message_label)
+        message_layout.addWidget(message_edit)
+        layout.addLayout(message_layout)
+        
+        # Kaydet butonu
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("Kaydet")
+        cancel_button = QPushButton("İptal")
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        
+        # İndikatör değiştiğinde detay seçeneklerini güncelle
+        def update_details():
+            detail_combo.clear()
+            indicator = indicator_combo.currentText()
+            if indicator == "İndicPro":
+                detail_combo.addItems(["Ana Çizgi"])
+            elif indicator == "MACD":
+                detail_combo.addItems(["MACD", "Signal", "Histogram"])
+            elif indicator == "Bollinger":
+                detail_combo.addItems(["Üst Bant", "Orta Bant", "Alt Bant"])
+            elif indicator == "Volume Weighted MACD":
+                detail_combo.addItems(["VW MACD", "VW Signal", "VW Histogram"])
+            
+            # Koşulları güncelle
+            condition_combo.clear()
+            if indicator in ["İndicPro", "MACD", "Volume Weighted MACD"]:
+                condition_combo.addItems(["Üstüne Çıktığında", "Altına Düştüğünde"])
+            elif indicator == "Bollinger":
+                condition_combo.addItems(["Üstüne Çıktığında", "Altına Düştüğünde"])
+        
+        indicator_combo.currentTextChanged.connect(update_details)
+        update_details()  # İlk yükleme için çağır
+        
+        def save_bulk_alarms():
+            selected_coins = [item.text() for item in coin_list.selectedItems()]
+            if not selected_coins:
+                QMessageBox.warning(dialog, "Uyarı", "En az bir coin seçmelisiniz!")
+                return
+                
+            timeframe = time_combo.currentText()
+            indicator = indicator_combo.currentText()
+            detail = detail_combo.currentText()
+            condition = condition_combo.currentText()
+            value = value_edit.text()
+            is_once = once_radio.isChecked()
+            expiry = expiry_edit.dateTime().toPyDateTime()
+            name_template = name_edit.text()
+            message = message_edit.text()
+            
+            success_count = 0
+            error_count = 0
+            error_messages = []
+            
+            # Her seçili coin için alarm oluştur
+            for coin in selected_coins:
+                # Coin adını alarm adına ekle
+                alarm_name = f"{name_template}_{coin}" if name_template else f"Alarm_{coin}"
+                
+                try:
+                    # Her alarm için benzersiz bir ID oluştur
+                    timestamp = int(time.time() * 1000)  # Milisaniye cinsinden timestamp
+                    time.sleep(0.001)  # Her ID'nin benzersiz olmasını garantile
+                    unique_id = f"IndicSigs-ID:{timestamp}-{coin}"
+                    
+                    # save_alarm fonksiyonunu sessiz modda çağır (QMessageBox gösterme)
+                    alarm_data = {
+                        "id": unique_id,
+                        "coin": coin,
+                        "timeframe": timeframe,
+                        "indicator": indicator,
+                        "detail": detail,
+                        "condition": condition,
+                        "value": value,
+                        "is_once": is_once,
+                        "expiry": expiry.strftime("%Y-%m-%d %H:%M:%S"),
+                        "name": alarm_name,
+                        "message": message
+                    }
+                    
+                    # Lokalde kaydet
+                    alarms = []
+                    if os.path.exists("alarms.json"):
+                        with open("alarms.json", "r") as f:
+                            alarms = json.load(f)
+                    
+                    alarms.append(alarm_data)
+                    
+                    with open("alarms.json", "w") as f:
+                        json.dump(alarms, f)
+                    
+                    success_count += 1
+                except Exception as e:
+                    error_count += 1
+                    error_messages.append(f"{coin} için alarm oluşturulamadı - {str(e)}")
+            
+            # İşlem sonunda tek bir bildirim göster
+            if error_count > 0:
+                message = f"{success_count} alarm başarıyla kaydedildi.\n{error_count} alarm oluşturulamadı."
+                if error_messages:
+                    message += "\n\nHata detayları:\n" + "\n".join(error_messages)
+                QMessageBox.warning(dialog, "İşlem Tamamlandı", message)
+            else:
+                QMessageBox.information(dialog, "Başarılı", f"{success_count} alarm başarıyla kaydedildi!")
+            
+            dialog.accept()
+            
+        def cancel():
+            dialog.reject()
+        
+        save_button.clicked.connect(save_bulk_alarms)
+        cancel_button.clicked.connect(cancel)
+        
+        # Dark theme
+        dialog.setStyleSheet("""
+            QDialog, QGroupBox {
+                background-color: #1a1a1a;
+                color: white;
+            }
+            QLabel {
+                color: white;
+            }
+            QComboBox, QLineEdit, QDateTimeEdit {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QListWidget {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 4px;
+            }
+            QCheckBox, QRadioButton {
+                color: white;
+            }
+            QPushButton {
+                background-color: #2962ff;
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+        """)
+        
+        dialog.exec_()
+    
+    def get_btc_analysis(self, timeframes=['1m', '3m', '5m', '15m', '30m', '45m', '1h']):
+        """BTC analizi yapar ve rapor formatında döndürür"""
+        try:
+            current_time = datetime.now().strftime('%H:%M')
+            report_lines = []
+            
+            # Anlık BTC fiyatı
+            df = self.get_coin_data('BTCUSDT', '1m')
+            if df is not None and not df.empty:
+                price = df['close'].iloc[-1]
+                report_lines.append(f"💲 Fiyat: {price:,.2f} USDT")
+            
+            # Her timeframe için değişim hesapla
+            thresholds = {
+                '1m': 0.30, '3m': 0.40, '5m': 0.50,
+                '15m': 1.00, '30m': 1.25, '45m': 1.25, '1h': 1.50
+            }
+            
+            # Anlık değişim
+            current_change = self.calculate_btc_change('1m')
+            if current_change is not None:
+                direction = "📈" if current_change > 0 else "📉"
+                report_lines.append(f"⚡ Anlık ({current_time}): ({current_change:+.2f}%) {direction}")
+            
+            # Diğer timeframe'ler için
+            for tf in timeframes:
+                change = self.calculate_btc_change(tf)
+                if change is not None:
+                    direction = "📈" if change > 0 else "📉"
+                    line = f"⏱️ {tf}: ({change:+.2f}%) {direction}"
+                    
+                    # Eşik kontrolü
+                    if abs(change) > thresholds.get(tf, 1.0):
+                        movement_emoji = "🟢" if change > 0 else "🔴"
+                        line += f" Sert Hareket {movement_emoji}"
+                        
+                    report_lines.append(line)
+            
+            return "\n".join(report_lines)
+        except Exception as e:
+            print(f"BTC analiz hatası: {str(e)}")
+            return ""
+
+    def calculate_btc_change(self, timeframe):
+        """Belirli bir timeframe için BTC değişimini hesaplar"""
+        try:
+            current_time = datetime.now().replace(second=0, microsecond=0)
+            
+            # Şu anki fiyatı al
+            df = self.get_coin_data('BTCUSDT', '1m')
+            if df is None or df.empty:
+                return None
+            current_price = df['close'].iloc[-1]
+            
+            # Timeframe'e göre geçmiş zamanı hesapla
+            if timeframe.endswith('m'):
+                minutes = int(timeframe[:-1])
+                past_time = current_time - timedelta(minutes=minutes)
+            elif timeframe.endswith('h'):
+                hours = int(timeframe[:-1])
+                past_time = current_time - timedelta(hours=hours)
+            else:
+                return None
+            
+            # Geçmiş zamanın en yakın fiyatını bul
+            past_prices = [(t, p) for t, p in self.btc_prices.items() if t <= past_time]
+            if not past_prices:
+                return None
+                
+            # En yakın zamandaki fiyatı al
+            past_time, past_price = max(past_prices, key=lambda x: x[0])
+            
+            # Yüzde değişimi hesapla
+            change = ((current_price - past_price) / past_price) * 100
+            
+            print(f"Timeframe: {timeframe}")
+            print(f"Current time: {current_time}, price: {current_price}")
+            print(f"Past time: {past_time}, price: {past_price}")
+            print(f"Change: {change}%")
+            
+            return change
+            
+        except Exception as e:
+            print(f"BTC değişim hesaplama hatası ({timeframe}): {str(e)}")
+            return None
+
+    def update_btc_prices(self):
+        """Her 15 saniyede bir BTC fiyatlarını günceller"""
+        try:
+            # 1 dakikalık mumlardan veri al
+            df = self.get_coin_data('BTCUSDT', '1m')
+            if df is None or df.empty:
+                return
+                
+            current_time = datetime.now()
+            current_price = df['close'].iloc[-1]
+            
+            # Şu anki zamanı dakika başına yuvarla
+            rounded_time = current_time.replace(second=0, microsecond=0)
+            
+            # Fiyatı kaydet
+            self.btc_prices[rounded_time] = current_price
+            
+            # 1 saatten eski verileri temizle
+            cutoff_time = rounded_time - timedelta(hours=1)
+            self.btc_prices = {k: v for k, v in self.btc_prices.items() if k >= cutoff_time}
+            
+            # Fiyatları dosyaya kaydet
+            self.save_btc_prices()
+            
+        except Exception as e:
+            print(f"BTC fiyat güncelleme hatası: {str(e)}")
+
+    def check_all_alarms(self):
+        """Tüm kayıtlı alarmları kontrol et"""
+        if not os.path.exists("alarms.json"):
+            return
+            
+        try:
+            # BTC fiyatlarını güncelle
+            self.update_btc_prices()
+            
+            with open("alarms.json", "r") as f:
+                alarms = json.load(f)
+                
+            if not alarms:  # Alarm yoksa
+                return
+                
+            print(f"\n{'='*50}")
+            print(f"Toplam {len(alarms)} alarm kontrol ediliyor")
+            print(f"{'='*50}\n")
+            
+            # Her alarm için ayrı kontrol yap
+            for alarm in alarms:
+                try:
+                    # Eğer alarm zaten tetiklendiyse ve tek seferlik ise atla
+                    if alarm.get('triggered', False) and alarm.get('is_once', True):
+                        print(f"Alarm '{alarm['name']}' zaten tetiklenmiş ve tek seferlik, atlanıyor.")
+                        continue
+                    
+                    coin = alarm['coin']
+                    timeframe = alarm['timeframe']
+                    
+                    print(f"\n{'*'*30}")
+                    print(f"Alarm Kontrol: {alarm['name']}")
+                    print(f"Coin: {coin}, Timeframe: {timeframe}")
+                    print(f"İndikatör: {alarm['indicator']} ({alarm['detail']})")
+                    print(f"Koşul: {alarm['condition']}, Hedef: {alarm['value']}")
+                    print(f"{'*'*30}\n")
+                    
+                    # Coin verilerini al
+                    df = self.get_coin_data(coin, timeframe)
+                    if df is None:
+                        print(f"Coin verisi alınamadı: {coin}")
+                        continue
+                        
+                    # Her alarm için benzersiz bir anahtar oluştur
+                    alarm_key = f"{alarm['name']}_{alarm['coin']}_{alarm['timeframe']}_{alarm['indicator']}_{alarm['detail']}_{alarm['condition']}_{alarm['value']}"
+                    triggered = False
+                    current_value = None
+                    previous_value = self.previous_values.get(alarm_key, None)
+                    
+                    print(f"Alarm anahtarı: {alarm_key}")
+                    print(f"Önceki değer: {previous_value}")
+                    
+                    # İndikatör değerlerini al
+                    if alarm["indicator"] == "İndicPro":
+                        wt_result = calculate_wavetrend(df)
+                        wt1, wt2 = wt_result['wt1'], wt_result['wt2']
+                        print(f"İndicPro değerleri - WT1: {wt1:.2f}, WT2: {wt2:.2f}")
+                        
+                        if alarm["detail"] == "Ana Çizgi":
+                            current_value = wt1
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                        elif alarm["detail"] == "Sinyal Çizgisi":
+                            current_value = wt2
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                        elif alarm["detail"] == "Kesişim":
+                            if alarm["condition"] == "Yukarı Kesişim":
+                                triggered = wt1 > wt2 and (previous_value is None or wt1 <= wt2)
+                                print(f"Yukarı Kesişim kontrolü:")
+                                print(f"WT1 > WT2: {wt1} > {wt2} = {wt1 > wt2}")
+                            elif alarm["condition"] == "Aşağı Kesişim":
+                                triggered = wt1 < wt2 and (previous_value is None or wt1 >= wt2)
+                                print(f"Aşağı Kesişim kontrolü:")
+                                print(f"WT1 < WT2: {wt1} < {wt2} = {wt1 < wt2}")
+                    
+                    elif alarm["indicator"] == "MACD":
+                        macd_result = calculate_macd_dema(df)
+                        macd_line, signal_line, hist = macd_result['MACD_DEMA'], macd_result['Signal_DEMA'], macd_result['MACD_Hist_DEMA']
+                        print(f"MACD değerleri - MACD: {macd_line:.2f}, Signal: {signal_line:.2f}, Hist: {hist:.2f}")
+                        
+                        if alarm["detail"] == "MACD Çizgisi":
+                            current_value = macd_line
+                        elif alarm["detail"] == "Sinyal Çizgisi":
+                            current_value = signal_line
+                        elif alarm["detail"] == "Histogram":
+                            current_value = hist
+                        elif alarm["detail"] == "Kesişim":
+                            if alarm["condition"] == "Yukarı Kesişim":
+                                triggered = macd_line > signal_line and (previous_value is None or macd_line <= signal_line)
+                                print(f"MACD Yukarı Kesişim kontrolü:")
+                                print(f"MACD > Signal: {macd_line} > {signal_line} = {macd_line > signal_line}")
+                            elif alarm["condition"] == "Aşağı Kesişim":
+                                triggered = macd_line < signal_line and (previous_value is None or macd_line >= signal_line)
+                                print(f"MACD Aşağı Kesişim kontrolü:")
+                                print(f"MACD < Signal: {macd_line} < {signal_line} = {macd_line < signal_line}")
+                                
+                        if not triggered and alarm["detail"] != "Kesişim":
+                            target = float(alarm["value"])
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_value > target and (previous_value is None or previous_value <= target)
+                                print(f"Üstüne Çıktığında kontrolü:")
+                                print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                                print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_value < target and (previous_value is None or previous_value >= target)
+                                print(f"Altına Düştüğünde kontrolü:")
+                                print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                                print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                    
+                    elif alarm["indicator"] == "Bollinger":
+                        try:
+                            bb_data = calculate_bollinger_bands(df)
+                            current_price = df['close'].iloc[-1]
+                            
+                            # Seçilen banda göre değeri al
+                            if alarm["detail"] == "Üst Bant":
+                                band_value = bb_data['BB_upper']
+                            elif alarm["detail"] == "Orta Bant":
+                                band_value = bb_data['BB_middle']
+                            elif alarm["detail"] == "Alt Bant":
+                                band_value = bb_data['BB_lower']
+                            else:
+                                print(f"Geçersiz Bollinger bandı detayı: {alarm['detail']}")
+                                continue
+                            
+                            print(f"Bollinger {alarm['detail']} kontrolü:")
+                            print(f"Mevcut Fiyat: {current_price:.8f}")
+                            print(f"Bant Değeri: {band_value:.8f}")
+                            
+                            # Koşula göre kontrol et
+                            if alarm["condition"] == "Üstüne Çıktığında":
+                                triggered = current_price > band_value and (previous_value is None or previous_value <= band_value)
+                                print(f"Üstüne Çıktığında kontrolü: {current_price:.2f} > {band_value:.2f} = {triggered}")
+                            elif alarm["condition"] == "Altına Düştüğünde":
+                                triggered = current_price < band_value and (previous_value is None or previous_value >= band_value)
+                                print(f"Altına Düştüğünde kontrolü: {current_price:.2f} < {band_value:.2f} = {triggered}")
+                            elif alarm["condition"] == "Eşit Olduğunda":
+                                # Eşitlik için küçük bir tolerans kullan
+                                tolerance = band_value * 0.0001  # %0.01 tolerans
+                                triggered = abs(current_price - band_value) <= tolerance
+                                print(f"Eşit Olduğunda kontrolü: |{current_price:.2f} - {band_value:.2f}| <= {tolerance:.2f} = {triggered}")
+                            
+                            current_value = current_price
+                            
+                        except Exception as e:
+                            print(f"Bollinger alarm kontrolünde hata: {str(e)}")
+                            traceback.print_exc()
+                            continue
+                    elif alarm["indicator"] == "Volume Weighted MACD":
+                        vwmacd_result = {
+                            'macd': (df['volume'] * df['close']).ewm(span=12, adjust=False).mean() / df['volume'].ewm(span=12, adjust=False).mean() - \
+                                   (df['volume'] * df['close']).ewm(span=26, adjust=False).mean() / df['volume'].ewm(span=26, adjust=False).mean(),
+                            'signal': None,
+                            'histogram': None
+                        }
+                        
+                        # Sinyal ve histogram hesapla
+                        vwmacd_result['signal'] = vwmacd_result['macd'].ewm(span=9, adjust=False).mean()
+                        vwmacd_result['histogram'] = vwmacd_result['macd'] - vwmacd_result['signal']
+                        
+                        if alarm["detail"] == "VW MACD":
+                            current_value = vwmacd_result['macd'].iloc[-1]
+                        elif alarm["detail"] == "VW Signal":
+                            current_value = vwmacd_result['signal'].iloc[-1]
+                        elif alarm["detail"] == "VW Histogram":
+                            current_value = vwmacd_result['histogram'].iloc[-1]
+                            
+                        target = float(alarm["value"])
+                        if alarm["condition"] == "Üstüne Çıktığında":
+                            triggered = current_value > target and (previous_value is None or previous_value <= target)
+                            print(f"Üstüne Çıktığında kontrolü:")
+                            print(f"Current > Target: {current_value} > {target} = {current_value > target}")
+                            print(f"Previous <= Target: {previous_value} <= {target} = {previous_value is None or previous_value <= target}")
+                        elif alarm["condition"] == "Altına Düştüğünde":
+                            triggered = current_value < target and (previous_value is None or previous_value >= target)
+                            print(f"Altına Düştüğünde kontrolü:")
+                            print(f"Current < Target: {current_value} < {target} = {current_value < target}")
+                            print(f"Previous >= Target: {previous_value} >= {target} = {previous_value is None or previous_value >= target}")
+                    
+                    # Mevcut değeri kaydet
+                    if current_value is not None:
+                        self.previous_values[alarm_key] = current_value
+                    
+                    print(f"\nAlarm durumu: {'Tetiklendi' if triggered else 'Tetiklenmedi'}\n")
+                    
+                    # Alarm tetiklendiyse
+                    if triggered:
+                        # Ana sinyalin yönünü belirle (LONG mu SHORT mu)
+                        main_df = self.get_coin_data(coin, alarm['timeframe'])
+                        main_wt1 = self.calculate_indicator_value(alarm, main_df)
+                        
+                        if main_wt1 is None:
+                            print("⚠️ Ana sinyal hesaplanamadı, atlanıyor")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        # Sinyal yönünü belirle
+                        if main_wt1 <= -60:
+                            signal_direction = "LONG"
+                        elif main_wt1 >= 60:
+                            signal_direction = "SHORT"
+                        else:
+                            signal_direction = "NÖTR"
+                        
+                        print(f"\n{'='*60}")
+                        print(f"SİNYAL TETİKLENDİ: {coin} - {signal_direction}")
+                        print(f"{'='*60}")
+                        
+                        # 🛡️ KONTROL 1: 5m ve 1m timeframe'leri kontrol et
+                        security_passed, security_message = self.check_signal_strength(coin, alarm)
+                        
+                        if not security_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Güvenlik): {security_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 1 GEÇTİ: {security_message}")
+                        
+                        # 📊 KONTROL 2: Volatilite riski kontrol et
+                        volatility_passed, volatility_message = self.check_volatility_risk(coin, signal_direction)
+                        
+                        if not volatility_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Volatilite): {volatility_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 2 GEÇTİ: {volatility_message}")
+                        
+                        # 🚫 KONTROL 3: Spam kontrolü
+                        spam_passed, spam_message = self.check_spam_prevention(coin)
+                        
+                        if not spam_passed:
+                            print(f"\n⛔ SİNYAL İPTAL EDİLDİ (Spam): {spam_message}")
+                            print(f"Alarm: {alarm['name']}, Coin: {coin}")
+                            self.previous_values[alarm_key] = current_value
+                            continue
+                        
+                        print(f"✅ KONTROL 3 GEÇTİ: {spam_message}")
+                        
+                        print(f"\n{'='*60}")
+                        print(f"🎯 TÜM KONTROLLER GEÇİLDİ - SİNYAL GÖNDERİLİYOR!")
+                        print(f"{'='*60}\n")
+                        
+                        # Windows alarm sesi çal (4 saniye)
+                        try:
+                            winsound.Beep(1000, 4000)  # 1000 Hz, 4000 ms (4 saniye)
+                        except:
+                            print("Ses çalınamadı")
+                        
+                        # Fiyat için ondalık basamak sayısını dinamik olarak hesapla
+                        current_price = df['close'].iloc[-1]
+                        decimal_count = len(str(current_price).split('.')[-1]) + 1
+                        
+                        # Fiyatı %0.05 düşür
+                        discounted_price = current_price * (1 - 0.0005)  # %0.05 düşük
+                        
+                        # Bildirim mesajını hazırla
+                        notification_message = f"🚨 {alarm['name']}\n\n"
+                        notification_message += f"💰 Coin: {coin}\n"
+                        notification_message += f"💵 Fiyat: {discounted_price:.{decimal_count}f} USDT\n"  # %0.05 düşük fiyat
+                        notification_message += f"📊 İndikatör: {alarm['indicator']} ({alarm['detail']})\n"
+                        notification_message += f"📈 Koşul: {alarm['condition']}\n"
+                        notification_message += f"🎯 Hedef: {alarm['value']}\n\n"
+                        
+                        # 24 saatlik performans bilgisi ekle
+                        market_position_text = self.format_market_position_text(coin)
+                        if market_position_text:
+                            notification_message += market_position_text + "\n"
+                        
+                        notification_message += f"⏱ Zaman Dilimleri:\n"                                                                        
+
+                        # Ana zaman dilimi (15m)
+                        main_timeframe_data = self.get_coin_data(coin, timeframe)
+                        main_result = self.calculate_indicator_value(alarm, main_timeframe_data)
+                        if main_result is not None:
+                            if main_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif main_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif main_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif main_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif main_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif main_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • {timeframe}: {main_result:.2f}{signal}\n"
+
+                        # 5 dakikalık veri
+                        five_min_data = self.get_coin_data(coin, "5m")
+                        if five_min_data is not None:
+                            five_min_result = self.calculate_indicator_value(alarm, five_min_data)
+                            if five_min_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif five_min_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif five_min_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif five_min_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif five_min_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif five_min_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • 5m: {five_min_result:.2f}{signal}\n"
+
+                        # 1 dakikalık veri
+                        one_min_data = self.get_coin_data(coin, "1m")
+                        if one_min_data is not None:
+                            one_min_result = self.calculate_indicator_value(alarm, one_min_data)
+                            if one_min_result <= -80:
+                                signal = " 🟢 🟢 🟢 - - 3 LONG"
+                            elif one_min_result <= -70:
+                                signal = " 🟢 🟢 - - 2 LONG"
+                            elif one_min_result <= -60:
+                                signal = " 🟢 - - 1 LONG"
+                            elif one_min_result >= 80:
+                                signal = " 🔴 🔴 🔴 - - 3 SHORT"
+                            elif one_min_result >= 70:
+                                signal = " 🔴 🔴 - - 2 SHORT"
+                            elif one_min_result >= 60:
+                                signal = " 🔴 - - 1 SHORT"
+                            else:
+                                signal = ""
+                            notification_message += f"   • 1m: {one_min_result:.2f}{signal}\n"
+
+                        if 'message' in alarm and alarm['message']:
+                            notification_message += f"\n📝 Not: {alarm['message']}"                            
+
+                        # Bildirim ekle
+                        self.add_notification(notification_message)
+                        
+                        # Telegram'a gönder
+                        self.send_notification(notification_message)
+                        
+                        # Son sinyal zamanını kaydet (spam önleme için)
+                        self.update_last_signal_time(coin)
+                        
+                        # Alarm durumunu güncelle
+                        if alarm.get('is_once', True):
+                            alarm['triggered'] = True
+                            with open("alarms.json", "w") as f:
+                                json.dump(alarms, f)
+                
+                except Exception as e:
+                    print(f"Alarm kontrolünde hata: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Alarm kontrolünde genel hata: {e}")
+    
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    
+    # Login penceresini göster
+    from login import LoginWindow
+    login_window = LoginWindow()
+    if login_window.exec_() == QDialog.Accepted:
+        # Login başarılı, ana pencereyi göster
+        token, user = login_window.get_user_data()
+        window = MainWindow()
+        window.token = token
+        window.user = user
+        window.show()
+        sys.exit(app.exec_())
