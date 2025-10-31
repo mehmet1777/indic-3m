@@ -1,18 +1,49 @@
 import { Signal } from '@/types/signal';
 import { signalStorage } from './signalStorage';
 import { screenshotService } from './screenshot';
+import { put } from '@vercel/blob';
+import { compressImage } from './imageCompression';
 
 export class SignalProcessor {
   async processSignal(signal: Signal, chartBlob?: Blob, indicatorBlob?: Blob): Promise<void> {
     try {
-      // In Vercel serverless, we can't save files to disk
-      // Images would need to be stored in a cloud storage service (S3, Cloudinary, etc.)
-      // For now, we just save the signal metadata without images
-      
+      let chartImagePath: string | undefined;
+      let indicatorImagePath: string | undefined;
+
+      // Upload chart image to Vercel Blob
+      if (chartBlob) {
+        try {
+          const compressedChart = await compressImage(chartBlob, 500);
+          const blob = await put(`signals/${signal.id}/chart.jpg`, compressedChart, {
+            access: 'public',
+            addRandomSuffix: false,
+          });
+          chartImagePath = blob.url;
+          console.log('Chart image uploaded:', blob.url);
+        } catch (error) {
+          console.error('Error uploading chart image:', error);
+        }
+      }
+
+      // Upload indicator image to Vercel Blob
+      if (indicatorBlob) {
+        try {
+          const compressedIndicator = await compressImage(indicatorBlob, 500);
+          const blob = await put(`signals/${signal.id}/indicator.jpg`, compressedIndicator, {
+            access: 'public',
+            addRandomSuffix: false,
+          });
+          indicatorImagePath = blob.url;
+          console.log('Indicator image uploaded:', blob.url);
+        } catch (error) {
+          console.error('Error uploading indicator image:', error);
+        }
+      }
+
       const updatedSignal: Signal = {
         ...signal,
-        chartImagePath: chartBlob ? `/signals/${signal.id}/chart.jpg` : undefined,
-        indicatorImagePath: indicatorBlob ? `/signals/${signal.id}/indicator.jpg` : undefined,
+        chartImagePath,
+        indicatorImagePath,
         folderPath: `/signals/${signal.id}`
       };
 
