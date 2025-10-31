@@ -1,41 +1,19 @@
 import { Signal } from '@/types/signal';
 import { signalStorage } from './signalStorage';
 import { screenshotService } from './screenshot';
-import { compressImage } from './imageCompression';
-import path from 'path';
-import { writeFile } from 'fs/promises';
 
 export class SignalProcessor {
   async processSignal(signal: Signal, chartBlob?: Blob, indicatorBlob?: Blob): Promise<void> {
     try {
-      const folderPath = await signalStorage.createSignalFolder(signal);
+      // In Vercel serverless, we can't save files to disk
+      // Images would need to be stored in a cloud storage service (S3, Cloudinary, etc.)
+      // For now, we just save the signal metadata without images
       
-      let chartImagePath: string | undefined;
-      let indicatorImagePath: string | undefined;
-
-      if (chartBlob) {
-        const compressedChart = await compressImage(chartBlob, 500);
-        const chartFilename = `chart-${signal.timestamp}.jpg`;
-        const chartPath = path.join(folderPath, chartFilename);
-        const buffer = Buffer.from(await compressedChart.arrayBuffer());
-        await writeFile(chartPath, buffer);
-        chartImagePath = chartPath.replace(process.cwd(), '');
-      }
-
-      if (indicatorBlob) {
-        const compressedIndicator = await compressImage(indicatorBlob, 500);
-        const indicatorFilename = `indicator-${signal.timestamp}.jpg`;
-        const indicatorPath = path.join(folderPath, indicatorFilename);
-        const buffer = Buffer.from(await compressedIndicator.arrayBuffer());
-        await writeFile(indicatorPath, buffer);
-        indicatorImagePath = indicatorPath.replace(process.cwd(), '');
-      }
-
       const updatedSignal: Signal = {
         ...signal,
-        chartImagePath,
-        indicatorImagePath,
-        folderPath: folderPath.replace(process.cwd(), '')
+        chartImagePath: chartBlob ? `/signals/${signal.id}/chart.jpg` : undefined,
+        indicatorImagePath: indicatorBlob ? `/signals/${signal.id}/indicator.jpg` : undefined,
+        folderPath: `/signals/${signal.id}`
       };
 
       await signalStorage.saveSignal(updatedSignal);
