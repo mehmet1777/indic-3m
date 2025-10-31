@@ -49,7 +49,7 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
       // Wait for charts to fully render - check if canvas has actual content
       console.log('Waiting for charts to render...');
       
-      const waitForCanvas = async (ref: React.RefObject<HTMLDivElement>, maxWait = 10000) => {
+      const waitForCanvas = async (ref: React.RefObject<HTMLDivElement | null>, maxWait = 10000) => {
         const startTime = Date.now();
         while (Date.now() - startTime < maxWait) {
           const canvas = ref.current?.querySelector('canvas') as HTMLCanvasElement;
