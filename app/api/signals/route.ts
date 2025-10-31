@@ -110,6 +110,15 @@ export async function POST(request: NextRequest) {
     console.log(`Signal received: ${signal.id} - ${signal.symbol} ${signal.signalType} at ${signal.price}`);
     console.log(`Broadcasting to ${signalBroadcaster.getListenerCount()} listeners`);
 
+    // Trigger server-side screenshot capture (non-blocking)
+    fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'}/api/capture-screenshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signalId: signal.id })
+    }).catch(error => {
+      console.error('Failed to trigger screenshot:', error);
+    });
+
     return NextResponse.json(
       { 
         success: true, 

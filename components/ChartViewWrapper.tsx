@@ -48,15 +48,15 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
     try {
       // Wait for charts to fully render - check if canvas has actual content
       console.log('Waiting for charts to render...');
-      
+
       const waitForCanvas = async (ref: React.RefObject<HTMLDivElement | null>, name: string, maxWait = 15000) => {
         const startTime = Date.now();
         let checkCount = 0;
-        
+
         while (Date.now() - startTime < maxWait) {
           checkCount++;
           const canvas = ref.current?.querySelector('canvas') as HTMLCanvasElement;
-          
+
           if (canvas && canvas.width > 0 && canvas.height > 0) {
             try {
               const ctx = canvas.getContext('2d');
@@ -67,7 +67,7 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
                   { x: Math.floor(canvas.width * 0.5), y: Math.floor(canvas.height * 0.5) },
                   { x: Math.floor(canvas.width * 0.75), y: Math.floor(canvas.height * 0.5) },
                 ];
-                
+
                 let coloredPixels = 0;
                 for (const point of samplePoints) {
                   const pixel = ctx.getImageData(point.x, point.y, 1, 1).data;
@@ -76,7 +76,7 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
                     coloredPixels++;
                   }
                 }
-                
+
                 // Need at least 2 out of 3 sample points to have color
                 if (coloredPixels >= 2) {
                   console.log(`${name} canvas ready after ${checkCount} checks (${Date.now() - startTime}ms)`);
@@ -89,25 +89,25 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
               console.warn(`Error checking ${name} canvas:`, error);
             }
           }
-          
+
           await new Promise(resolve => setTimeout(resolve, 800));
         }
-        
+
         console.warn(`${name} canvas timeout after ${checkCount} checks`);
         return false;
       };
-      
+
       // Wait for both canvases to have content
       console.log('Waiting for indicator canvases...');
       const results = await Promise.all([
         waitForCanvas(indicator1Ref, 'Indicator 1'),
         waitForCanvas(indicator2Ref, 'Indicator 2')
       ]);
-      
+
       if (!results[0] || !results[1]) {
         console.error('One or more canvases failed to render properly');
       }
-      
+
       // Extra safety delay for any remaining animations
       console.log('Final safety delay before capture...');
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -217,7 +217,7 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
         } else {
           setError('Failed to load chart data');
         }
-        
+
         // If in auto-capture mode, redirect back to signals page after error
         const isAutoCapture = searchParams.get('capture') === 'true';
         if (isAutoCapture) {

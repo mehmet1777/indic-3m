@@ -58,9 +58,9 @@ export function SignalCaptureWorker() {
               !processedSignals.current.has(signal.id) &&
               !signalQueue.current.find(s => s.id === signal.id)
             ) {
-              console.log(`Adding signal to queue: ${signal.id} (${signal.symbol})`);
+              console.log(`Adding signal to queue: ${signal.id} (${signal.symbol}) - Missing screenshots`);
               signalQueue.current.push(signal);
-              addProcessedSignal(signal.id);
+              // Don't mark as processed yet - only after successful screenshot
             }
           }
           
@@ -88,9 +88,25 @@ export function SignalCaptureWorker() {
       console.log(`Processing signal: ${signal.id}`);
       router.push(`/chart/${signal.symbol}?capture=true&signalId=${signal.id}`);
       
-      // Wait for screenshot to complete and redirect back
-      // Increased timeout to handle errors (2s error display + redirect)
-      await new Promise(resolve => setTimeout(resolve, 12000));
+      // Wait longer for screenshot to complete (increased for canvas render time)
+      await new Promise(resolve => setTimeout(resolve, 25000));
+      
+      // Check if screenshot was successful by fetching signal again
+      try {
+        const checkResponse = await fetch('/api/signals');
+        const checkData = await checkResponse.json();
+        const updatedSignal = checkData.signals?.find((s: any) => s.id === signal.id);
+        
+        if (updatedSignal?.chartImagePath && updatedSignal?.indicatorImagePath) {
+          console.log(`✓ Screenshot successful for ${signal.id}`);
+          addProcessedSignal(signal.id);
+        } else {
+          console.warn(`✗ Screenshot may have failed for ${signal.id} - will retry next time`);
+          // Don't mark as processed - will retry on next poll
+        }
+      } catch (checkError) {
+        console.error('Error checking screenshot status:', checkError);
+      }
       
       setCurrentSignal(null);
       setIsCapturing(false);
@@ -105,8 +121,7 @@ export function SignalCaptureWorker() {
     } catch (error) {
       console.error('Error processing signal:', error);
       
-      // Mark signal as processed even on error to avoid retry loop
-      addProcessedSignal(signal.id);
+      // Don't mark as processed on error - will retry
       
       setIsCapturing(false);
       setCurrentSignal(null);
