@@ -49,46 +49,68 @@ export default function ChartViewWrapper({ symbol }: ChartViewProps) {
       // Wait for charts to fully render - check if canvas has actual content
       console.log('Waiting for charts to render...');
       
-      const waitForCanvas = async (ref: React.RefObject<HTMLDivElement | null>, maxWait = 10000) => {
+      const waitForCanvas = async (ref: React.RefObject<HTMLDivElement | null>, name: string, maxWait = 15000) => {
         const startTime = Date.now();
+        let checkCount = 0;
+        
         while (Date.now() - startTime < maxWait) {
+          checkCount++;
           const canvas = ref.current?.querySelector('canvas') as HTMLCanvasElement;
+          
           if (canvas && canvas.width > 0 && canvas.height > 0) {
-            // Check if canvas has actual content (not just black/empty)
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const data = imageData.data;
-              
-              // Check if there's any non-black pixel
-              let hasContent = false;
-              for (let i = 0; i < data.length; i += 4) {
-                if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) {
-                  hasContent = true;
-                  break;
+            try {
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                // Sample multiple points across the canvas
+                const samplePoints = [
+                  { x: Math.floor(canvas.width * 0.25), y: Math.floor(canvas.height * 0.5) },
+                  { x: Math.floor(canvas.width * 0.5), y: Math.floor(canvas.height * 0.5) },
+                  { x: Math.floor(canvas.width * 0.75), y: Math.floor(canvas.height * 0.5) },
+                ];
+                
+                let coloredPixels = 0;
+                for (const point of samplePoints) {
+                  const pixel = ctx.getImageData(point.x, point.y, 1, 1).data;
+                  // Check if pixel is not black/dark (RGB > 20)
+                  if (pixel[0] > 20 || pixel[1] > 20 || pixel[2] > 20) {
+                    coloredPixels++;
+                  }
+                }
+                
+                // Need at least 2 out of 3 sample points to have color
+                if (coloredPixels >= 2) {
+                  console.log(`${name} canvas ready after ${checkCount} checks (${Date.now() - startTime}ms)`);
+                  // Wait a bit more to ensure animation is complete
+                  await new Promise(resolve => setTimeout(resolve, 1500));
+                  return true;
                 }
               }
-              
-              if (hasContent) {
-                console.log('Canvas has content, ready to capture');
-                return true;
-              }
+            } catch (error) {
+              console.warn(`Error checking ${name} canvas:`, error);
             }
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          await new Promise(resolve => setTimeout(resolve, 800));
         }
-        console.warn('Canvas render timeout');
+        
+        console.warn(`${name} canvas timeout after ${checkCount} checks`);
         return false;
       };
       
       // Wait for both canvases to have content
-      await Promise.all([
-        waitForCanvas(indicator1Ref),
-        waitForCanvas(indicator2Ref)
+      console.log('Waiting for indicator canvases...');
+      const results = await Promise.all([
+        waitForCanvas(indicator1Ref, 'Indicator 1'),
+        waitForCanvas(indicator2Ref, 'Indicator 2')
       ]);
       
-      // Extra safety delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!results[0] || !results[1]) {
+        console.error('One or more canvases failed to render properly');
+      }
+      
+      // Extra safety delay for any remaining animations
+      console.log('Final safety delay before capture...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Capture indicators using Lightweight Charts' built-in screenshot functionality
 

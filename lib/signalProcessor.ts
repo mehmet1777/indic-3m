@@ -81,7 +81,7 @@ export class SignalProcessor {
 
   async retryProcessSignal(signal: Signal, maxRetries = 3): Promise<void> {
     let lastError: Error | null = null;
-    
+
     for (let i = 0; i < maxRetries; i++) {
       try {
         await this.processSignal(signal);
@@ -91,7 +91,7 @@ export class SignalProcessor {
         await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
       }
     }
-    
+
     throw lastError || new Error('Failed to process signal after retries');
   }
 }
